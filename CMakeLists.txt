@@ -1,0 +1,249 @@
+cmake_minimum_required(VERSION 3.22)
+project(FrameKeeperRT LANGUAGES CXX)  # CUDA is enabled conditionally below
+
+# ---------------- Basics ----------------
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# Detect WSL (handy for headless paths or conditional code)
+set(IS_WSL 0)
+if(EXISTS "/proc/version")
+  file(READ "/proc/version" _wslver)
+  string(TOLOWER "${_wslver}" _wslver_lc)
+  if(_wslver_lc MATCHES "microsoft")
+    set(IS_WSL 1)
+    message(STATUS "WSL environment detected")
+    add_compile_definitions(FRAMEKEEPER_WSL=1)
+  endif()
+endif()
+
+# Build type default
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+option(ENABLE_ASAN  "Enable AddressSanitizer" OFF)
+option(ENABLE_LTO   "Enable link-time optimization" ON)
+option(ENABLE_TESTS "Build tests in tests/ if present" ON)
+
+# ---------------- CUDA (optional) ----------------
+# Try to locate nvcc. User can also pass -DCMAKE_CUDA_COMPILER=/path/to/nvcc
+if(NOT CMAKE_CUDA_COMPILER)
+  find_program(CMAKE_CUDA_COMPILER nvcc HINTS /usr/local/cuda/bin ENV PATH)
+endif()
+
+set(HAVE_CUDA 0)
+if(CMAKE_CUDA_COMPILER)
+  # Set arch list BEFORE enabling CUDA language to avoid empty-arch error.
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    # Safe defaults for modern GPUs; adjust if you want fewer.
+    set(CMAKE_CUDA_ARCHITECTURES "86;89")
+  endif()
+
+  enable_language(CUDA)
+  set(CMAKE_CUDA_STANDARD 17)
+  set(HAVE_CUDA 1)
+  message(STATUS "CUDA enabled with nvcc: ${CMAKE_CUDA_COMPILER}")
+else()
+  message(WARNING "nvcc not found. Building CPU-only (NO_CUDA=1).")
+endif()
+
+# ---------------- Toolchain / QoL ----------------
+if(ENABLE_ASAN AND (CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo"))
+  add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address)
+endif()
+
+if(ENABLE_LTO AND CMAKE_BUILD_TYPE STREQUAL "Release")
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT _ipo_supported OUTPUT _ipo_msg)
+  if(_ipo_supported)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+  else()
+    message(WARNING "LTO not supported: ${_ipo_msg}")
+  endif()
+endif()
+
+# ---------------- Dependencies ----------------
+include(FetchContent)
+find_package(Threads REQUIRED)
+
+# CUDA Toolkit targets (optional—lets us use CUDA::cudart; otherwise we link -lcudart by name)
+if(HAVE_CUDA)
+  find_package(CUDAToolkit QUIET)
+  if(NOT CUDAToolkit_FOUND)
+    message(WARNING "CUDAToolkit targets not found; will link cudart by name.")
+  endif()
+endif()
+
+# OpenCV (optional; headless is fine)
+find_package(OpenCV QUIET COMPONENTS core imgproc videoio)
+if(OpenCV_FOUND)
+  message(STATUS "OpenCV found: ${OpenCV_VERSION}")
+else()
+  message(WARNING "OpenCV not found. Building without video ingest helpers.")
+endif()
+
+# TensorRT (optional)
+set(TENSORRT_ROOT "" CACHE PATH "Root of TensorRT (optional)")
+find_path(TENSORRT_INCLUDE_DIR NvInfer.h
+  HINTS ${TENSORRT_ROOT} /usr/include /usr/include/x86_64-linux-gnu /usr/local/include
+  PATH_SUFFIXES include nvinfer)
+find_library(NVINFER_LIB nvinfer
+  HINTS ${TENSORRT_ROOT} /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib)
+find_library(NVONNXPARSER_LIB nvonnxparser
+  HINTS ${TENSORRT_ROOT} /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib)
+
+if(TENSORRT_INCLUDE_DIR AND NVINFER_LIB)
+  add_library(tensorrt::nvinfer UNKNOWN IMPORTED)
+  set_target_properties(tensorrt::nvinfer PROPERTIES
+    IMPORTED_LOCATION "${NVINFER_LIB}"
+    INTERFACE_INCLUDE_DIRECTORIES "${TENSORRT_INCLUDE_DIR}")
+  if(NVONNXPARSER_LIB)
+    add_library(tensorrt::nvonnxparser UNKNOWN IMPORTED)
+    set_target_properties(tensorrt::nvonnxparser PROPERTIES
+      IMPORTED_LOCATION "${NVONNXPARSER_LIB}"
+      INTERFACE_INCLUDE_DIRECTORIES "${TENSORRT_INCLUDE_DIR}")
+  endif()
+  add_compile_definitions(HAVE_TENSORRT=1)
+  message(STATUS "TensorRT found: include=${TENSORRT_INCLUDE_DIR}")
+else()
+  message(WARNING "TensorRT not found. Guard TRT code with HAVE_TENSORRT.")
+endif()
+
+# Header-only libs via FetchContent (fast, reproducible)
+# CLI11
+FetchContent_Declare(CLI11 GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git GIT_TAG v2.4.2)
+FetchContent_MakeAvailable(CLI11)
+# nlohmann::json
+FetchContent_Declare(JSON URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
+FetchContent_MakeAvailable(JSON)
+# spdlog
+FetchContent_Declare(spdlog GIT_REPOSITORY https://github.com/gabime/spdlog.git GIT_TAG v1.13.0)
+set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(spdlog)
+# yaml-cpp (prefer system; else fetch)
+find_package(yaml-cpp QUIET)
+if(NOT yaml-cpp_FOUND)
+  FetchContent_Declare(yaml-cpp
+    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+    GIT_TAG yaml-cpp-0.8.0)
+  set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(yaml-cpp)
+endif()
+
+# ---------------- Sources / Targets ----------------
+# Include common C++ extensions and CUDA.
+file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
+  "src/*.cc" "src/*.cpp" "src/*.cxx" "src/*.cu"
+)
+file(GLOB_RECURSE APP_HEADERS CONFIGURE_DEPENDS
+  "include/*.h" "include/*.hpp" "include/*.hh"
+)
+
+if(APP_SOURCES)
+  add_executable(framekeeper-rt ${APP_SOURCES} ${APP_HEADERS})
+  target_include_directories(framekeeper-rt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+  # Per-target warnings (don’t pollute third-party deps)
+  target_compile_options(framekeeper-rt PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall>
+    $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
+    $<$<COMPILE_LANGUAGE:CXX>:-Wshadow>
+    $<$<COMPILE_LANGUAGE:CXX>:-Wpedantic>
+    $<$<COMPILE_LANGUAGE:CXX>:-Wconversion>
+    # For CUDA we must split tokens:
+    $<$<COMPILE_LANGUAGE:CUDA>:-Xcudafe>
+    $<$<COMPILE_LANGUAGE:CUDA>:--diag_suppress=esa_on_defaulted_function_ignored>
+  )
+
+  # Core links
+  target_link_libraries(framekeeper-rt PRIVATE
+    Threads::Threads
+    CLI11::CLI11
+    nlohmann_json::nlohmann_json
+    spdlog::spdlog
+    yaml-cpp
+  )
+
+  # Optional: CUDA
+  if(HAVE_CUDA)
+    if(TARGET CUDA::cudart)
+      target_link_libraries(framekeeper-rt PRIVATE CUDA::cudart)
+    else()
+      target_link_libraries(framekeeper-rt PRIVATE cudart)
+    endif()
+  else()
+    target_compile_definitions(framekeeper-rt PRIVATE NO_CUDA=1)
+  endif()
+
+  # Optional: OpenCV
+  if(OpenCV_FOUND)
+    target_link_libraries(framekeeper-rt PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(framekeeper-rt PRIVATE HAVE_OPENCV=1)
+    if(IS_WSL)
+      target_compile_definitions(framekeeper-rt PRIVATE HEADLESS=1)
+    endif()
+  endif()
+
+  # Optional: TensorRT
+  if(TARGET tensorrt::nvinfer)
+    target_link_libraries(framekeeper-rt PRIVATE tensorrt::nvinfer)
+  endif()
+  if(TARGET tensorrt::nvonnxparser)
+    target_link_libraries(framekeeper-rt PRIVATE tensorrt::nvonnxparser)
+  endif()
+
+  # RPATH for TRT at runtime
+  if(NVINFER_LIB)
+    get_filename_component(_trt_libdir "${NVINFER_LIB}" DIRECTORY)
+    set_property(TARGET framekeeper-rt PROPERTY BUILD_RPATH "${_trt_libdir}")
+  endif()
+
+  # Speed flags for Release
+  target_compile_options(framekeeper-rt PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CXX>>:-O3 -DNDEBUG>
+    $<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-O3 -DNDEBUG>
+  )
+
+  message(STATUS "Target 'framekeeper-rt' configured for ${CMAKE_BUILD_TYPE}.")
+else()
+  message(WARNING "No sources in src/. Add code then re-run CMake.")
+endif()
+
+# ---------------- Tests ----------------
+if(ENABLE_TESTS)
+  file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "tests/*.cc" "tests/*.cpp" "tests/*.cxx")
+  if(TEST_SOURCES)
+    enable_testing()
+    FetchContent_Declare(googletest
+      GIT_REPOSITORY https://github.com/google/googletest.git
+      GIT_TAG v1.14.0)
+    FetchContent_MakeAvailable(googletest)
+
+    add_executable(unit_tests ${TEST_SOURCES})
+    target_include_directories(unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    if(TARGET framekeeper-rt)
+      target_link_libraries(unit_tests PRIVATE framekeeper-rt)
+    endif()
+    target_link_libraries(unit_tests PRIVATE GTest::gtest_main)
+    add_test(NAME unit_tests COMMAND unit_tests)
+  endif()
+endif()
+
+# ---------------- Convenience ----------------
+if(TARGET framekeeper-rt)
+  add_custom_target(run
+    COMMAND $<TARGET_FILE:framekeeper-rt> --help
+    COMMENT "Run the demo binary (or show help).")
+else()
+  add_custom_target(run
+    COMMAND ${CMAKE_COMMAND} -E echo "No 'framekeeper-rt' target yet. Add sources under src/ and re-configure."
+    COMMENT "Placeholder 'run' target (no sources found).")
+endif()
+
+add_custom_target(format
+  COMMAND ${CMAKE_COMMAND} -E echo "Hook up clang-format here."
+  COMMENT "Formatting placeholder")
