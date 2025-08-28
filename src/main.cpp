@@ -20,6 +20,19 @@ int main(int argc, char** argv) {
   spdlog::set_pattern("[%H:%M:%S.%e] %^[%l]%$ %v");
   spdlog::info("FrameKeeper-RT starting (config: {})", cfg_path);
 
+  // Log build configuration
+#if !defined(NO_CUDA)
+  spdlog::info("Build configuration: CUDA support enabled");
+#else
+  spdlog::info("Build configuration: CPU-only (NO_CUDA defined)");
+#endif
+
+#if defined(HAVE_OPENCV)
+  spdlog::info("OpenCV support: enabled");
+#else
+  spdlog::info("OpenCV support: disabled");
+#endif
+
   AppConfig app = load_config(cfg_path);
   MetricsRegistry metrics;
   Pipeline pipe(app.pipeline, app.deadline, metrics);
