@@ -1,0 +1,16 @@
+input:
+  uri: "data/sample_1080p30.mp4"
+  width: 1920
+  height: 1080
+  fps: 30
+pipeline:
+  budget_ms: 33.0
+  target_fps: 30
+  queue_capacity: 4
+  drop_policy: "drop_oldest"
+controller:
+  switch_up_p95_ms: 28.0
+  switch_down_p95_ms: 22.0
+  hysteresis_frames: 90
+telemetry:
+  metrics_port: 9090

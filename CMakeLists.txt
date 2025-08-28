@@ -123,6 +123,11 @@ FetchContent_MakeAvailable(JSON)
 FetchContent_Declare(spdlog GIT_REPOSITORY https://github.com/gabime/spdlog.git GIT_TAG v1.13.0)
 set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(spdlog)
+# httplib (cpp-httplib)
+FetchContent_Declare(httplib
+  GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+  GIT_TAG v0.15.3)
+FetchContent_MakeAvailable(httplib)
 # yaml-cpp (prefer system; else fetch)
 find_package(yaml-cpp QUIET)
 if(NOT yaml-cpp_FOUND)
@@ -166,6 +171,7 @@ if(APP_SOURCES)
     nlohmann_json::nlohmann_json
     spdlog::spdlog
     yaml-cpp
+    httplib::httplib
   )
 
   # Optional: CUDA

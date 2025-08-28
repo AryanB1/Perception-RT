@@ -1,6 +1,82 @@
-#include<iostream>
+#include <atomic>
+#include <thread>
+#include <string>
+#include <sstream>
+#include <spdlog/spdlog.h>
+#include <nlohmann/json.hpp>
 
-int main() {
-    std::cout << "Hello" << std::endl;
-    return 0;
+#include <httplib.h>
+#include "util.hpp"
+#include "pipeline.hpp"
+#include "controller.hpp"
+#include "metrics.hpp"
+
+int main(int argc, char** argv) {
+  std::string cfg_path = "configs/config.yaml";
+  for (int i = 1; i + 1 < argc; ++i) {
+    if (std::string(argv[i]) == "--config") cfg_path = argv[i+1];
+  }
+
+  spdlog::set_pattern("[%H:%M:%S.%e] %^[%l]%$ %v");
+  spdlog::info("FrameKeeper-RT starting (config: {})", cfg_path);
+
+  AppConfig app = load_config(cfg_path);
+  MetricsRegistry metrics;
+  Pipeline pipe(app.pipeline, app.deadline, metrics);
+
+  if (!pipe.open()) {
+    spdlog::error("Failed to open input. Exiting.");
+    return 1;
+  }
+
+  std::atomic<bool> ready{false};
+  std::atomic<bool> running{false};
+
+  httplib::Server svr;
+
+  svr.Get("/healthz", [&](const httplib::Request&, httplib::Response& res){
+    res.set_content("{\"status\":\"ok\"}", "application/json");
+  });
+
+  svr.Get("/readyz", [&](const httplib::Request&, httplib::Response& res){
+    res.set_content(std::string("{\"ready\":") + (ready?"true":"false") + "}", "application/json");
+  });
+
+  svr.Post("/pipeline/start", [&](const httplib::Request&, httplib::Response& res){
+    if (!running.exchange(true)) { pipe.start(); ready = true; }
+    res.set_content("{\"started\":true}", "application/json");
+  });
+
+  svr.Post("/pipeline/stop", [&](const httplib::Request&, httplib::Response& res){
+    if (running.exchange(false)) { pipe.stop(); ready = false; }
+    res.set_content("{\"stopped\":true}", "application/json");
+  });
+
+  svr.Get("/pipeline/stats", [&](const httplib::Request&, httplib::Response& res){
+    auto s = pipe.stats();
+    nlohmann::json j{
+      {"fps", s.fps},
+      {"e2e_p50", s.e2e_p50},
+      {"e2e_p95", s.e2e_p95},
+      {"e2e_p99", s.e2e_p99},
+      {"miss_rate", s.miss_rate}
+    };
+    res.set_content(j.dump(2), "application/json");
+  });
+
+  svr.Get("/metrics", [&](const httplib::Request&, httplib::Response& res){
+    auto s = pipe.stats();
+    res.set_content(metrics.prometheus_text(s), "text/plain; version=0.0.4");
+  });
+
+  pipe.start();
+  running = true; ready = true;
+
+  spdlog::info("HTTP server listening on 0.0.0.0:{}", app.metrics_port);
+  svr.listen("0.0.0.0", app.metrics_port);
+
+  // Cleanup
+  if (running) pipe.stop();
+  spdlog::info("Shutdown complete.");
+  return 0;
 }
