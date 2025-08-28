@@ -4,6 +4,7 @@
 #include <sstream>
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
+#include <CLI/CLI.hpp>
 
 #include <httplib.h>
 #include "util.hpp"
@@ -12,9 +13,26 @@
 #include "metrics.hpp"
 
 int main(int argc, char** argv) {
+  CLI::App cli_app{"FrameKeeper-RT: Real-time video motion detection and ML inference system"};
+  
   std::string cfg_path = "configs/config.yaml";
-  for (int i = 1; i + 1 < argc; ++i) {
-    if (std::string(argv[i]) == "--config") cfg_path = argv[i+1];
+  cli_app.add_option("-c,--config", cfg_path, "Configuration file path")
+         ->check(CLI::ExistingFile);
+
+  bool show_version = false;
+  cli_app.add_flag("-v,--version", show_version, "Show version information");
+
+  try {
+    cli_app.parse(argc, argv);
+  } catch (const CLI::ParseError &e) {
+    return cli_app.exit(e);
+  }
+
+  if (show_version) {
+    std::cout << "FrameKeeper-RT v1.0.0" << std::endl;
+    std::cout << "Real-time video processing with CUDA acceleration" << std::endl;
+    std::cout << "Features: YOLOv11, Optical Flow, Semantic Segmentation, TensorRT" << std::endl;
+    return 0;
   }
 
   spdlog::set_pattern("[%H:%M:%S.%e] %^[%l]%$ %v");

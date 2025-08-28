@@ -1,5 +1,7 @@
 #include "pipeline.hpp"
 #include "types.hpp"
+#include "motion_detector.hpp"
+#include "ml_engine.hpp"
 #include <spdlog/spdlog.h>
 #include <chrono>
 #include <thread>
@@ -124,8 +126,11 @@ void Pipeline::start() {
           last_stats_ = snap;
         }
 
-        spdlog::info("frame_id={} [CUDA] pre_ms={:.3f} inf_ms={:.3f} post(D2H)_ms={:.3f} e2e_ms={:.3f} missed={}",
-                     frame_id - 1, pre_ms, inf_ms, d2h_ms, e2e_ms, missed);
+        // Get motion detection results from GPU
+        GpuMotionResult motion_result = gpu_get_motion_result(g, prev);
+
+        spdlog::info("frame_id={} [CUDA] pre_ms={:.3f} inf_ms={:.3f} post(D2H)_ms={:.3f} e2e_ms={:.3f} missed={} motion_detected={} motion_intensity={:.4f} motion_pixels={}",
+                     frame_id - 1, pre_ms, inf_ms, d2h_ms, e2e_ms, missed, motion_result.motion_detected, motion_result.motion_intensity, motion_result.motion_pixels);
       } else {
         first_launched = true;
       }
@@ -155,34 +160,109 @@ void Pipeline::start() {
 #else
     spdlog::info("Starting pipeline with CPU processing path (NO_CUDA defined)");
     uint64_t frame_id = 0;
+
+#if defined(HAVE_OPENCV)
+    // Initialize motion detector for CPU path
+    MotionDetector motion_detector(MotionDetector::Algorithm::BACKGROUND_SUB, 640, 640);
+    motion_detector.set_threshold(25.0);
+    motion_detector.set_min_contour_area(500.0);
+    
+    // Initialize ML Engine for advanced inference
+    MLConfig ml_config;
+    ml_config.enable_detection = true;
+    ml_config.enable_optical_flow = true;
+    ml_config.enable_segmentation = false; // Disable for performance
+    ml_config.use_tensorrt = true;
+    ml_config.input_size = cv::Size(640, 640);
+    ml_config.detection_threshold = 0.5f;
+    ml_config.nms_threshold = 0.4f;
+    
+    auto ml_engine = createMLEngine(ml_config);
+    if (!ml_engine->initialize()) {
+        spdlog::warn("Failed to initialize ML Engine, falling back to simple motion detection");
+        ml_engine.reset();
+    }
+#endif
+
     while (running_) {
       auto t0 = Clock::now();
 #if defined(HAVE_OPENCV)
       cv::Mat img; cap >> img;
       if (img.empty()) { std::this_thread::sleep_for(std::chrono::milliseconds(50)); continue; }
+      
+      // Preprocessing: resize and convert to RGB
+      auto t_pre0 = Clock::now();
       cv::Mat pre;  cv::resize(img, pre, cv::Size(640,640)); cv::cvtColor(pre, pre, cv::COLOR_BGR2RGB);
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
       auto t_pre1 = Clock::now();
 
+      // Motion detection inference
       auto t_inf0 = Clock::now();
-      cv::Mat inf = pre.clone();
-      std::this_thread::sleep_for(std::chrono::milliseconds(8));
+      MLResult ml_result;
+      MotionResult motion_result;
+      
+      if (ml_engine) {
+        // Use advanced ML inference
+        ml_result = ml_engine->process(pre);
+        
+        // Convert ML result to motion result for compatibility
+        motion_result.motion_detected = ml_result.motion_detected;
+        motion_result.motion_intensity = ml_result.motion_intensity;
+        motion_result.motion_pixels = ml_result.motion_pixels;
+        motion_result.bounding_box = ml_result.motion_bbox;
+      } else {
+        // Fallback to simple motion detection
+        motion_result = motion_detector.process_frame(pre);
+      }
       auto t_inf1 = Clock::now();
 
+      // Postprocessing: visualize detection results
       auto t_post0 = Clock::now();
       cv::Mat post = pre.clone();
-      cv::rectangle(post, {10,10}, {100,100}, {255,0,0}, 2);
-      cv::putText(post, "FrameKeeper-RT", {12,35}, cv::FONT_HERSHEY_SIMPLEX, 0.6, {255,255,255}, 2);
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      
+      if (ml_engine && ml_result.total_objects > 0) {
+        // Draw advanced ML results
+        post = MLViz::drawComprehensiveResults(post, ml_result);
+        
+        // Add ML-specific information
+        std::string obj_text = "Objects: " + std::to_string(ml_result.total_objects);
+        cv::putText(post, obj_text, {10, 90}, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+        
+        std::string conf_text = "Max Conf: " + std::to_string(ml_result.max_confidence).substr(0, 4);
+        cv::putText(post, conf_text, {10, 110}, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+        
+        std::string flow_text = "Flow Pts: " + std::to_string(ml_result.optical_flow.moving_points);
+        cv::putText(post, flow_text, {10, 130}, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+      } else {
+        // Draw simple motion detection results
+        if (motion_result.motion_detected) {
+          cv::rectangle(post, motion_result.bounding_box, cv::Scalar(0, 255, 0), 2);
+          cv::putText(post, "MOTION DETECTED", {10, 30}, cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
+        } else {
+          cv::putText(post, "NO MOTION", {10, 30}, cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 0, 0), 2);
+        }
+        
+        // Display motion intensity and pixel count
+        std::string intensity_text = "Intensity: " + std::to_string(motion_result.motion_intensity).substr(0, 5);
+        std::string pixels_text = "Pixels: " + std::to_string(motion_result.motion_pixels);
+        cv::putText(post, intensity_text, {10, 60}, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+        cv::putText(post, pixels_text, {10, 80}, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+        
+        // Draw optical flow vectors if available
+        for (const auto& vec : motion_result.motion_vectors) {
+          cv::circle(post, cv::Point2f(vec.x, vec.y), 2, cv::Scalar(255, 255, 0), -1);
+        }
+      }
+      
       auto t_post1 = Clock::now();
 
-      double pre_ms  = duration<double, std::milli>(t_pre1 - t_inf0).count(); // approx
+      double pre_ms  = duration<double, std::milli>(t_pre1 - t_pre0).count();
       double inf_ms  = duration<double, std::milli>(t_inf1 - t_inf0).count();
       double post_ms = duration<double, std::milli>(t_post1 - t_post0).count();
       double e2e_ms  = duration<double, std::milli>(t_post1 - t0).count();
 #else
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       double pre_ms=0, inf_ms=0, post_ms=0, e2e_ms=0;
+      MotionResult motion_result{}; // Empty result for non-OpenCV builds
 #endif
       metrics_.add_pre(pre_ms);
       metrics_.add_inf(inf_ms);
@@ -192,8 +272,14 @@ void Pipeline::start() {
       bool missed = (e2e_ms > budget);
       if (missed) metrics_.inc_miss();
 
+#if defined(HAVE_OPENCV)
+      spdlog::info("frame_id={} [CPU] pre_ms={:.3f} inf_ms={:.3f} post_ms={:.3f} e2e_ms={:.3f} missed={} motion_detected={} motion_intensity={:.4f} motion_pixels={} objects={}",
+                   frame_id, pre_ms, inf_ms, post_ms, e2e_ms, missed, motion_result.motion_detected, motion_result.motion_intensity, motion_result.motion_pixels, 
+                   ml_engine ? ml_result.total_objects : 0);
+#else
       spdlog::info("frame_id={} [CPU] pre_ms={:.3f} inf_ms={:.3f} post_ms={:.3f} e2e_ms={:.3f} missed={}",
                    frame_id, pre_ms, inf_ms, post_ms, e2e_ms, missed);
+#endif
 
       frames_in_window++;
       auto now = Clock::now();

@@ -14,3 +14,34 @@ controller:
   hysteresis_frames: 90
 telemetry:
   metrics_port: 9090
+ml_engine:
+  # Model paths (relative to project root)
+  yolo_model_path: "models/yolov11n.onnx"
+  segmentation_model_path: "models/deeplabv3.onnx"
+  
+  # TensorRT settings
+  use_tensorrt: true
+  use_fp16: true
+  max_batch_size: 1
+  max_workspace_size: 1073741824  # 1GB
+  
+  # Detection settings
+  detection_threshold: 0.5
+  nms_threshold: 0.4
+  max_detections: 100
+  
+  # Optical flow settings
+  max_corners: 100
+  optical_flow_threshold: 1.0
+  
+  # Segmentation settings
+  segmentation_threshold: 0.5
+  
+  # Processing settings
+  input_width: 640
+  input_height: 640
+  
+  # Feature toggles
+  enable_detection: true
+  enable_optical_flow: true
+  enable_segmentation: false  # Disabled by default for performance
