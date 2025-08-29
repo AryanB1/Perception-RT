@@ -2,8 +2,6 @@
 #include <algorithm>
 #include <cmath>
 
-#if defined(HAVE_OPENCV)
-
 MotionDetector::MotionDetector(Algorithm algo, int width, int height)
     : algorithm_(algo), width_(width), height_(height) {
     switch (algorithm_) {
@@ -204,63 +202,3 @@ MotionResult MotionDetector::detect_optical_flow(const cv::Mat& frame) {
     
     return result;
 }
-
-#else
-
-// Non-OpenCV implementation - simple frame differencing
-MotionDetector::MotionDetector(Algorithm algo, int width, int height)
-    : algorithm_(algo), width_(width), height_(height) {
-    prev_frame_.resize(width_ * height_ * 3);  // RGB
-}
-
-MotionDetector::~MotionDetector() = default;
-
-MotionResult MotionDetector::process_frame(const unsigned char* frame_data) {
-    return detect_simple_diff(frame_data);
-}
-
-void MotionDetector::reset() {
-    std::fill(prev_frame_.begin(), prev_frame_.end(), 0);
-}
-
-MotionResult MotionDetector::detect_simple_diff(const unsigned char* frame_data) {
-    MotionResult result;
-    
-    if (std::all_of(prev_frame_.begin(), prev_frame_.end(), [](unsigned char c){ return c == 0; })) {
-        // First frame - just store it
-        std::copy(frame_data, frame_data + prev_frame_.size(), prev_frame_.begin());
-        return result;
-    }
-    
-    int diff_pixels = 0;
-    double total_diff = 0;
-    const size_t pixel_count = width_ * height_;
-    
-    // Compare grayscale intensity (simple average of RGB)
-    for (size_t i = 0; i < pixel_count; ++i) {
-        const size_t rgb_idx = i * 3;
-        
-        // Current frame grayscale
-        int curr_gray = (frame_data[rgb_idx] + frame_data[rgb_idx + 1] + frame_data[rgb_idx + 2]) / 3;
-        
-        // Previous frame grayscale
-        int prev_gray = (prev_frame_[rgb_idx] + prev_frame_[rgb_idx + 1] + prev_frame_[rgb_idx + 2]) / 3;
-        
-        int diff = std::abs(curr_gray - prev_gray);
-        if (diff > threshold_) {
-            diff_pixels++;
-            total_diff += diff;
-        }
-    }
-    
-    result.motion_pixels = diff_pixels;
-    result.motion_intensity = std::min(1.0, static_cast<double>(diff_pixels) / pixel_count);
-    result.motion_detected = result.motion_intensity > 0.01; // 1% threshold
-    
-    // Store current frame for next iteration
-    std::copy(frame_data, frame_data + prev_frame_.size(), prev_frame_.begin());
-    
-    return result;
-}
-
-#endif

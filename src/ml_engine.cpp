@@ -8,7 +8,6 @@
 
 using namespace std::chrono;
 
-#if defined(HAVE_TENSORRT)
 // TensorRT Logger Implementation
 void TRTLogger::log(Severity severity, const char* msg) noexcept {
     if (severity <= min_severity_) {
@@ -168,7 +167,6 @@ void TensorRTEngine::freeBuffers() {
         d_output_ = nullptr;
     }
 }
-#endif
 
 // Performance Stats Implementation
 void MLEngine::PerformanceStats::update(float inference, float preprocessing, float postprocessing) {
@@ -186,9 +184,7 @@ void MLEngine::PerformanceStats::reset() {
 
 // MLEngine Implementation
 MLEngine::MLEngine(const MLConfig& config) : config_(config) {
-#if defined(HAVE_OPENCV)
     optical_flow_tracker_ = cv::SparsePyrLKOpticalFlow::create();
-#endif
 }
 
 MLEngine::~MLEngine() = default;
@@ -199,7 +195,6 @@ bool MLEngine::initialize() {
     // Load class names for YOLO
     loadClassNames();
     
-#if defined(HAVE_TENSORRT)
     if (config_.use_tensorrt) {
         try {
             // Initialize YOLO engine
@@ -238,38 +233,6 @@ bool MLEngine::initialize() {
             config_.use_tensorrt = false;
         }
     }
-#endif
-
-#if defined(HAVE_OPENCV)
-    // Fallback to OpenCV DNN if TensorRT not available
-    if (!config_.use_tensorrt) {
-        spdlog::info("Using OpenCV DNN as fallback");
-        
-        if (config_.enable_detection) {
-            try {
-                yolo_net_ = cv::dnn::readNetFromONNX(config_.yolo_model_path);
-                yolo_net_.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
-                yolo_net_.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
-                spdlog::info("YOLO model loaded with OpenCV DNN");
-            } catch (const cv::Exception& e) {
-                spdlog::error("Failed to load YOLO model: {}", e.what());
-                config_.enable_detection = false;
-            }
-        }
-        
-        if (config_.enable_segmentation) {
-            try {
-                segmentation_net_ = cv::dnn::readNetFromONNX(config_.segmentation_model_path);
-                segmentation_net_.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
-                segmentation_net_.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
-                spdlog::info("Segmentation model loaded with OpenCV DNN");
-            } catch (const cv::Exception& e) {
-                spdlog::error("Failed to load segmentation model: {}", e.what());
-                config_.enable_segmentation = false;
-            }
-        }
-    }
-#endif
 
     spdlog::info("ML Engine initialized successfully");
     spdlog::info("  - Object Detection: {}", config_.enable_detection ? "Enabled" : "Disabled");
@@ -348,7 +311,6 @@ std::vector<Detection> MLEngine::detectObjects(const cv::Mat& frame) {
     cv::Mat preprocessed = preprocessForYOLO(frame);
     float prep_time = getElapsedMs();
     
-#if defined(HAVE_TENSORRT)
     if (config_.use_tensorrt && yolo_engine_) {
         // TensorRT inference
         std::vector<float> input_data(preprocessed.total());
@@ -367,83 +329,13 @@ std::vector<Detection> MLEngine::detectObjects(const cv::Mat& frame) {
             spdlog::debug("YOLO TensorRT: prep={:.2f}ms, infer={:.2f}ms, post={:.2f}ms", 
                          prep_time, inf_time, post_time);
         }
-    } else
-#endif
-    {
-#if defined(HAVE_OPENCV)
-        // OpenCV DNN fallback
-        cv::Mat blob = cv::dnn::blobFromImage(frame, 1.0/255.0, config_.input_size, cv::Scalar(), true, false);
-        yolo_net_.setInput(blob);
-        
-        startTimer();
-        std::vector<cv::Mat> outputs;
-        yolo_net_.forward(outputs, yolo_net_.getUnconnectedOutLayersNames());
-        float inf_time = getElapsedMs();
-        
-        startTimer();
-        // Simplified YOLO postprocessing for OpenCV DNN
-        if (!outputs.empty()) {
-            cv::Mat output = outputs[0];
-            float* data = (float*)output.data;
-            
-            for (int i = 0; i < output.rows; ++i) {
-                float confidence = data[i * output.cols + 4];
-                if (confidence > config_.detection_threshold) {
-                    Detection det;
-                    det.confidence = confidence;
-                    det.bbox.x = data[i * output.cols + 0] * frame.cols;
-                    det.bbox.y = data[i * output.cols + 1] * frame.rows;
-                    det.bbox.width = data[i * output.cols + 2] * frame.cols;
-                    det.bbox.height = data[i * output.cols + 3] * frame.rows;
-                    
-                    // Find best class
-                    float max_score = 0;
-                    for (int j = 5; j < output.cols; ++j) {
-                        if (data[i * output.cols + j] > max_score) {
-                            max_score = data[i * output.cols + j];
-                            det.class_id = j - 5;
-                        }
-                    }
-                    
-                    if (det.class_id >= 0 && det.class_id < class_names_.size()) {
-                        det.label = class_names_[det.class_id];
-                    }
-                    
-                    detections.push_back(det);
-                }
-            }
-            
-            // Apply NMS
-            std::vector<cv::Rect> boxes;
-            std::vector<float> confidences;
-            for (const auto& det : detections) {
-                boxes.push_back(det.bbox);
-                confidences.push_back(det.confidence);
-            }
-            
-            std::vector<int> indices;
-            cv::dnn::NMSBoxes(boxes, confidences, config_.detection_threshold, config_.nms_threshold, indices);
-            
-            std::vector<Detection> nms_detections;
-            for (int idx : indices) {
-                nms_detections.push_back(detections[idx]);
-            }
-            detections = nms_detections;
-        }
-        float post_time = getElapsedMs();
-        
-        spdlog::debug("YOLO OpenCV: prep={:.2f}ms, infer={:.2f}ms, post={:.2f}ms", 
-                     prep_time, inf_time, post_time);
-#endif
-    }
-    
+    }    
     return detections;
 }
 
 OpticalFlowResult MLEngine::computeOpticalFlow(const cv::Mat& frame) {
     OpticalFlowResult result;
     
-#if defined(HAVE_OPENCV)
     cv::Mat gray;
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
     
@@ -500,7 +392,6 @@ OpticalFlowResult MLEngine::computeOpticalFlow(const cv::Mat& frame) {
     }
     
     prev_gray_ = gray.clone();
-#endif
     
     return result;
 }

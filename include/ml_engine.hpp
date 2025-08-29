@@ -5,18 +5,14 @@
 #include <string>
 #include <unordered_map>
 
-#if defined(HAVE_OPENCV)
 #include <opencv2/opencv.hpp>
 #include <opencv2/dnn.hpp>
 #include <opencv2/video.hpp>
-#endif
 
-#if defined(HAVE_TENSORRT)
 #include <NvInfer.h>
 #include <NvOnnxParser.h>
 #include <cuda_runtime.h>
 #include <memory>
-#endif
 
 // Forward declarations
 struct MLResult;
@@ -107,7 +103,6 @@ struct MLConfig {
     bool enable_segmentation = false; // Disabled by default due to computational cost
 };
 
-#if defined(HAVE_TENSORRT)
 // TensorRT Logger
 class TRTLogger : public nvinfer1::ILogger {
 public:
@@ -153,7 +148,6 @@ private:
     void allocateBuffers();
     void freeBuffers();
 };
-#endif
 
 // Main ML Engine class
 class MLEngine {
@@ -191,12 +185,9 @@ private:
     MLConfig config_;
     PerformanceStats stats_;
     
-#if defined(HAVE_TENSORRT)
     std::unique_ptr<TensorRTEngine> yolo_engine_;
     std::unique_ptr<TensorRTEngine> segmentation_engine_;
-#endif
 
-#if defined(HAVE_OPENCV)
     // OpenCV DNN fallback
     cv::dnn::Net yolo_net_;
     cv::dnn::Net segmentation_net_;
@@ -208,7 +199,6 @@ private:
     
     // YOLO class names
     std::vector<std::string> class_names_;
-#endif
     
     // Preprocessing
     cv::Mat preprocessForYOLO(const cv::Mat& frame);

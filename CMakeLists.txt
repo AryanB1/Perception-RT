@@ -27,27 +27,25 @@ option(ENABLE_ASAN  "Enable AddressSanitizer" OFF)
 option(ENABLE_LTO   "Enable link-time optimization" ON)
 option(ENABLE_TESTS "Build tests in tests/ if present" ON)
 
-# ---------------- CUDA (optional) ----------------
+# ---------------- CUDA (required) ----------------
 # Try to locate nvcc. User can also pass -DCMAKE_CUDA_COMPILER=/path/to/nvcc
 if(NOT CMAKE_CUDA_COMPILER)
   find_program(CMAKE_CUDA_COMPILER nvcc HINTS /usr/local/cuda/bin ENV PATH)
 endif()
 
-set(HAVE_CUDA 0)
-if(CMAKE_CUDA_COMPILER)
-  # Set arch list BEFORE enabling CUDA language to avoid empty-arch error.
-  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    # Safe defaults for modern GPUs; adjust if you want fewer.
-    set(CMAKE_CUDA_ARCHITECTURES "86;89")
-  endif()
-
-  enable_language(CUDA)
-  set(CMAKE_CUDA_STANDARD 17)
-  set(HAVE_CUDA 1)
-  message(STATUS "CUDA enabled with nvcc: ${CMAKE_CUDA_COMPILER}")
-else()
-  message(WARNING "nvcc not found. Building CPU-only (NO_CUDA=1).")
+if(NOT CMAKE_CUDA_COMPILER)
+  message(FATAL_ERROR "CUDA is required but nvcc was not found. Please install CUDA Toolkit or set CMAKE_CUDA_COMPILER.")
 endif()
+
+# Set arch list BEFORE enabling CUDA language to avoid empty-arch error.
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  # Safe defaults for modern GPUs; adjust if you want fewer.
+  set(CMAKE_CUDA_ARCHITECTURES "86;89")
+endif()
+
+enable_language(CUDA)
+set(CMAKE_CUDA_STANDARD 17)
+message(STATUS "CUDA enabled with nvcc: ${CMAKE_CUDA_COMPILER}")
 
 # ---------------- Toolchain / QoL ----------------
 if(ENABLE_ASAN AND (CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo"))
@@ -69,27 +67,19 @@ endif()
 include(FetchContent)
 find_package(Threads REQUIRED)
 
-# CUDA Toolkit targets (optional—lets us use CUDA::cudart; otherwise we link -lcudart by name)
-if(HAVE_CUDA)
-  find_package(CUDAToolkit QUIET)
-  if(NOT CUDAToolkit_FOUND)
-    message(WARNING "CUDAToolkit targets not found; will link cudart by name.")
-  endif()
+# CUDA Toolkit targets (required)
+find_package(CUDAToolkit REQUIRED)
+message(STATUS "CUDAToolkit found: ${CUDAToolkit_VERSION}")
+
+# OpenCV (required)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio dnn)
+message(STATUS "OpenCV found: ${OpenCV_VERSION}")
+if(OpenCV_VERSION VERSION_GREATER_EQUAL "4.5.0")
+  message(STATUS "OpenCV DNN module available for ML inference")
 endif()
 
-# OpenCV (optional; headless is fine)
-find_package(OpenCV QUIET COMPONENTS core imgproc videoio dnn)
-if(OpenCV_FOUND)
-  message(STATUS "OpenCV found: ${OpenCV_VERSION}")
-  if(OpenCV_VERSION VERSION_GREATER_EQUAL "4.5.0")
-    message(STATUS "OpenCV DNN module available for ML inference")
-  endif()
-else()
-  message(WARNING "OpenCV not found. Building without video ingest helpers.")
-endif()
-
-# TensorRT (optional)
-set(TENSORRT_ROOT "" CACHE PATH "Root of TensorRT (optional)")
+# TensorRT (required)
+set(TENSORRT_ROOT "" CACHE PATH "Root of TensorRT")
 find_path(TENSORRT_INCLUDE_DIR NvInfer.h
   HINTS ${TENSORRT_ROOT} /usr/include /usr/include/x86_64-linux-gnu /usr/local/include
   PATH_SUFFIXES include nvinfer)
@@ -98,22 +88,23 @@ find_library(NVINFER_LIB nvinfer
 find_library(NVONNXPARSER_LIB nvonnxparser
   HINTS ${TENSORRT_ROOT} /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib)
 
-if(TENSORRT_INCLUDE_DIR AND NVINFER_LIB)
-  add_library(tensorrt::nvinfer UNKNOWN IMPORTED)
-  set_target_properties(tensorrt::nvinfer PROPERTIES
-    IMPORTED_LOCATION "${NVINFER_LIB}"
-    INTERFACE_INCLUDE_DIRECTORIES "${TENSORRT_INCLUDE_DIR}")
-  if(NVONNXPARSER_LIB)
-    add_library(tensorrt::nvonnxparser UNKNOWN IMPORTED)
-    set_target_properties(tensorrt::nvonnxparser PROPERTIES
-      IMPORTED_LOCATION "${NVONNXPARSER_LIB}"
-      INTERFACE_INCLUDE_DIRECTORIES "${TENSORRT_INCLUDE_DIR}")
-  endif()
-  add_compile_definitions(HAVE_TENSORRT=1)
-  message(STATUS "TensorRT found: include=${TENSORRT_INCLUDE_DIR}")
-else()
-  message(WARNING "TensorRT not found. Guard TRT code with HAVE_TENSORRT.")
+if(NOT TENSORRT_INCLUDE_DIR OR NOT NVINFER_LIB)
+  message(FATAL_ERROR "TensorRT is required but not found. Please install TensorRT or set TENSORRT_ROOT.")
 endif()
+
+add_library(tensorrt::nvinfer UNKNOWN IMPORTED)
+set_target_properties(tensorrt::nvinfer PROPERTIES
+  IMPORTED_LOCATION "${NVINFER_LIB}"
+  INTERFACE_INCLUDE_DIRECTORIES "${TENSORRT_INCLUDE_DIR}")
+if(NVONNXPARSER_LIB)
+  add_library(tensorrt::nvonnxparser UNKNOWN IMPORTED)
+  set_target_properties(tensorrt::nvonnxparser PROPERTIES
+    IMPORTED_LOCATION "${NVONNXPARSER_LIB}"
+    INTERFACE_INCLUDE_DIRECTORIES "${TENSORRT_INCLUDE_DIR}")
+else()
+  message(FATAL_ERROR "TensorRT nvonnxparser library is required but not found.")
+endif()
+message(STATUS "TensorRT found: include=${TENSORRT_INCLUDE_DIR}, nvinfer=${NVINFER_LIB}")
 
 # Header-only libs via FetchContent (fast, reproducible)
 # CLI11
@@ -167,7 +158,7 @@ if(APP_SOURCES)
     $<$<COMPILE_LANGUAGE:CUDA>:--diag_suppress=esa_on_defaulted_function_ignored>
   )
 
-  # Core links
+  # Core links (all required)
   target_link_libraries(framekeeper-rt PRIVATE
     Threads::Threads
     CLI11::CLI11
@@ -175,41 +166,20 @@ if(APP_SOURCES)
     spdlog::spdlog
     yaml-cpp
     httplib::httplib
+    CUDA::cudart
+    ${OpenCV_LIBS}
+    tensorrt::nvinfer
+    tensorrt::nvonnxparser
   )
 
-  # Optional: CUDA
-  if(HAVE_CUDA)
-    if(TARGET CUDA::cudart)
-      target_link_libraries(framekeeper-rt PRIVATE CUDA::cudart)
-    else()
-      target_link_libraries(framekeeper-rt PRIVATE cudart)
-    endif()
-  else()
-    target_compile_definitions(framekeeper-rt PRIVATE NO_CUDA=1)
-  endif()
-
-  # Optional: OpenCV
-  if(OpenCV_FOUND)
-    target_link_libraries(framekeeper-rt PRIVATE ${OpenCV_LIBS})
-    target_compile_definitions(framekeeper-rt PRIVATE HAVE_OPENCV=1)
-    if(IS_WSL)
-      target_compile_definitions(framekeeper-rt PRIVATE HEADLESS=1)
-    endif()
-  endif()
-
-  # Optional: TensorRT
-  if(TARGET tensorrt::nvinfer)
-    target_link_libraries(framekeeper-rt PRIVATE tensorrt::nvinfer)
-  endif()
-  if(TARGET tensorrt::nvonnxparser)
-    target_link_libraries(framekeeper-rt PRIVATE tensorrt::nvonnxparser)
+  # WSL-specific configuration
+  if(IS_WSL)
+    target_compile_definitions(framekeeper-rt PRIVATE HEADLESS=1)
   endif()
 
   # RPATH for TRT at runtime
-  if(NVINFER_LIB)
-    get_filename_component(_trt_libdir "${NVINFER_LIB}" DIRECTORY)
-    set_property(TARGET framekeeper-rt PROPERTY BUILD_RPATH "${_trt_libdir}")
-  endif()
+  get_filename_component(_trt_libdir "${NVINFER_LIB}" DIRECTORY)
+  set_property(TARGET framekeeper-rt PROPERTY BUILD_RPATH "${_trt_libdir}")
 
   # Speed flags for Release
   target_compile_options(framekeeper-rt PRIVATE
