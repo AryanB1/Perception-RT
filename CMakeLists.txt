@@ -224,5 +224,11 @@ else()
 endif()
 
 add_custom_target(format
-  COMMAND ${CMAKE_COMMAND} -E echo "Hook up clang-format here."
-  COMMENT "Formatting placeholder")
+  COMMAND find ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include -name "*.cpp" -o -name "*.hpp" -o -name "*.cu" -o -name "*.h" | xargs clang-format -i
+  COMMENT "Formatting C++ and CUDA source files with clang-format"
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_custom_target(format-check
+  COMMAND find ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include -name "*.cpp" -o -name "*.hpp" -o -name "*.cu" -o -name "*.h" | xargs clang-format --dry-run --Werror
+  COMMENT "Check if C++ and CUDA source files are properly formatted"
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

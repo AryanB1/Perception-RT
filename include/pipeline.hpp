@@ -3,8 +3,9 @@
 #include <mutex>
 #include <string>
 #include <thread>
-#include "types.hpp"
+
 #include "metrics.hpp"
+#include "types.hpp"
 
 struct PipelineConfig {
   std::string uri{"data/sample_1080p30.mp4"};
@@ -16,23 +17,23 @@ struct PipelineConfig {
 };
 
 class Pipeline {
- public:
+public:
   Pipeline(PipelineConfig cfg, DeadlineProfile dl, MetricsRegistry& m);
-  bool open();      // Validate input availability
-  void start();     // Start processing loop in a background thread
-  void stop();      // Stop and join thread
+  bool open();   // Validate input availability
+  void start();  // Start processing loop in a background thread
+  void stop();   // Stop and join thread
   bool running() const { return running_.load(); }
   StatSnapshot stats() const;
 
- private:
+private:
   bool next_frame_step();
 
-  bool preprocess_any(/*in*/void* in, /*out*/void* out);
-  bool inference_any (/*in*/void* in, /*out*/void* out);
-  bool postprocess_any(/*in*/void* in, /*out*/void* out);
+  bool preprocess_any(/*in*/ void* in, /*out*/ void* out);
+  bool inference_any(/*in*/ void* in, /*out*/ void* out);
+  bool postprocess_any(/*in*/ void* in, /*out*/ void* out);
 
-  PipelineConfig   cfg_;
-  DeadlineProfile  dl_;
+  PipelineConfig cfg_;
+  DeadlineProfile dl_;
   MetricsRegistry& metrics_;
 
   mutable std::mutex stat_mu_;

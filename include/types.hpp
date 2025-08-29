@@ -1,6 +1,6 @@
 #pragma once
-#include <cstdint>
 #include <chrono>
+#include <cstdint>
 #include <string>
 
 using Clock = std::chrono::steady_clock;
@@ -17,11 +17,11 @@ struct StageTimings {
 };
 
 struct DeadlineProfile {
-  int    target_fps{30};
+  int target_fps{30};
   double budget_ms{33.0};
   double switch_up_p95_ms{28.0};
   double switch_down_p95_ms{22.0};
-  int    hysteresis_frames{90};
+  int hysteresis_frames{90};
 };
 
 enum class ModelPrecision { FP16, INT8 };

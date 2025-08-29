@@ -8,7 +8,7 @@ PrecisionPlan Controller::decide_precision(const StatSnapshot& s) {
     under_count_++;
     over_count_ = 0;
   } else {
-    if (over_count_ > 0)  over_count_--;
+    if (over_count_ > 0) over_count_--;
     if (under_count_ > 0) under_count_--;
   }
 
@@ -21,6 +21,4 @@ PrecisionPlan Controller::decide_precision(const StatSnapshot& s) {
   return {ModelPrecision::FP16, "no-change"};
 }
 
-StreamPlan Controller::decide_streams(const StatSnapshot& /*s*/) {
-  return {-1, -2};
-}
+StreamPlan Controller::decide_streams(const StatSnapshot& /*s*/) { return {-1, -2}; }

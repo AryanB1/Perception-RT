@@ -1,24 +1,31 @@
 #include "pipeline.hpp"
-#include "types.hpp"
-#include "motion_detector.hpp"
-#include "ml_engine.hpp"
+
 #include <spdlog/spdlog.h>
+
 #include <chrono>
 #include <thread>
+
+#include "ml_engine.hpp"
+#include "motion_detector.hpp"
+#include "types.hpp"
 
 using namespace std::chrono;
 
 #include <opencv2/opencv.hpp>
+
 #include "gpu.hpp"
 
 Pipeline::Pipeline(PipelineConfig cfg, DeadlineProfile dl, MetricsRegistry& m)
-  : cfg_(std::move(cfg)), dl_(dl), metrics_(m) {}
+    : cfg_(std::move(cfg)), dl_(dl), metrics_(m) {}
 
 bool Pipeline::open() {
   if (cfg_.uri.empty()) return false;
   cv::VideoCapture cap;
   if (cfg_.uri == "0") {
-    if (!cap.open(0)) { spdlog::error("Failed to open webcam (0)."); return false; }
+    if (!cap.open(0)) {
+      spdlog::error("Failed to open webcam (0).");
+      return false;
+    }
   } else if (!cap.open(cfg_.uri)) {
     spdlog::error("Failed to open input: {}", cfg_.uri);
     return false;
@@ -29,7 +36,7 @@ bool Pipeline::open() {
 
 void Pipeline::start() {
   if (running_.exchange(true)) return;
-  loop_thread_ = std::thread([this]{
+  loop_thread_ = std::thread([this] {
     const double budget = dl_.budget_ms;
     const double period_ms = 1000.0 / static_cast<double>(std::max(1, dl_.target_fps));
 
@@ -38,17 +45,25 @@ void Pipeline::start() {
 
     cv::VideoCapture cap;
     if (cfg_.uri == "0") {
-      if (!cap.open(0)) { spdlog::error("Cannot open webcam in start()."); running_ = false; return; }
+      if (!cap.open(0)) {
+        spdlog::error("Cannot open webcam in start().");
+        running_ = false;
+        return;
+      }
     } else {
-      if (!cap.open(cfg_.uri)) { spdlog::error("Cannot open '{}' in start().", cfg_.uri); running_ = false; return; }
+      if (!cap.open(cfg_.uri)) {
+        spdlog::error("Cannot open '{}' in start().", cfg_.uri);
+        running_ = false;
+        return;
+      }
     }
-    cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg_.width);
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg_.width);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg_.height);
 
     spdlog::info("Starting pipeline with CUDA/GPU processing path");
     GpuContext g;
-    gpu_init(g, /*W*/640, /*H*/640, /*C*/3, /*iters*/32);
-    std::array<TimePoint,2> t_cap{};
+    gpu_init(g, /*W*/ 640, /*H*/ 640, /*C*/ 3, /*iters*/ 32);
+    std::array<TimePoint, 2> t_cap{};
     bool first_launched = false;
 
     uint64_t frame_id = 0;
@@ -78,9 +93,9 @@ void Pipeline::start() {
       if (first_launched) {
         gpu_wait_infer_done(g, prev);
 
-        float pre_ms  = gpu_elapsed_ms(g.pre_start[prev], g.pre_end[prev]);
-        float inf_ms  = gpu_elapsed_ms(g.inf_start[prev], g.inf_end[prev]);
-        float d2h_ms  = gpu_elapsed_ms(g.d2h_start[prev], g.d2h_end[prev]);
+        float pre_ms = gpu_elapsed_ms(g.pre_start[prev], g.pre_end[prev]);
+        float inf_ms = gpu_elapsed_ms(g.inf_start[prev], g.inf_end[prev]);
+        float d2h_ms = gpu_elapsed_ms(g.d2h_start[prev], g.d2h_end[prev]);
 
         // Calculate e2e using GPU event timing from start to completion
         float gpu_total_ms = gpu_elapsed_ms(g.pre_start[prev], g.d2h_end[prev]);
@@ -101,7 +116,8 @@ void Pipeline::start() {
         if (win_secs >= 1.0) {
           StatSnapshot snap = metrics_.snapshot(1.0);
           snap.fps = frames_in_window / win_secs;
-          frames_in_window = 0; window_start = now;
+          frames_in_window = 0;
+          window_start = now;
           std::lock_guard<std::mutex> gmu(stat_mu_);
           last_stats_ = snap;
         }
@@ -109,8 +125,11 @@ void Pipeline::start() {
         // Get motion detection results from GPU
         GpuMotionResult motion_result = gpu_get_motion_result(g, prev);
 
-        spdlog::info("frame_id={} [CUDA] pre_ms={:.3f} inf_ms={:.3f} post(D2H)_ms={:.3f} e2e_ms={:.3f} missed={} motion_detected={} motion_intensity={:.4f} motion_pixels={}",
-                     frame_id - 1, pre_ms, inf_ms, d2h_ms, e2e_ms, missed, motion_result.motion_detected, motion_result.motion_intensity, motion_result.motion_pixels);
+        spdlog::info(
+            "frame_id={} [CUDA] pre_ms={:.3f} inf_ms={:.3f} post(D2H)_ms={:.3f} e2e_ms={:.3f} "
+            "missed={} motion_detected={} motion_intensity={:.4f} motion_pixels={}",
+            frame_id - 1, pre_ms, inf_ms, d2h_ms, e2e_ms, missed, motion_result.motion_detected,
+            motion_result.motion_intensity, motion_result.motion_pixels);
       } else {
         first_launched = true;
       }
@@ -125,9 +144,9 @@ void Pipeline::start() {
     if (first_launched) {
       const int last = static_cast<int>((frame_id + 1) & 1);
       gpu_wait_infer_done(g, last);
-      float pre_ms  = gpu_elapsed_ms(g.pre_start[last], g.pre_end[last]);
-      float inf_ms  = gpu_elapsed_ms(g.inf_start[last], g.inf_end[last]);
-      float d2h_ms  = gpu_elapsed_ms(g.d2h_start[last], g.d2h_end[last]);
+      float pre_ms = gpu_elapsed_ms(g.pre_start[last], g.pre_end[last]);
+      float inf_ms = gpu_elapsed_ms(g.inf_start[last], g.inf_end[last]);
+      float d2h_ms = gpu_elapsed_ms(g.d2h_start[last], g.d2h_end[last]);
 
       metrics_.add_pre(pre_ms);
       metrics_.add_inf(inf_ms);
@@ -150,5 +169,5 @@ StatSnapshot Pipeline::stats() const {
 
 bool Pipeline::next_frame_step() { return true; }
 bool Pipeline::preprocess_any(void*, void*) { return true; }
-bool Pipeline::inference_any (void*, void*) { return true; }
+bool Pipeline::inference_any(void*, void*) { return true; }
 bool Pipeline::postprocess_any(void*, void*) { return true; }
