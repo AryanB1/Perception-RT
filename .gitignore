@@ -3,3 +3,5 @@
 CMakePresets.json
 *.service
 /build-cpu
+/model/venv
+*.pt
