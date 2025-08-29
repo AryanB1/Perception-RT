@@ -26,7 +26,10 @@ struct Detection {
     float confidence{0.0f};
     cv::Rect bbox;  // Use integer Rect instead of Rect2f
     std::string label;
-    cv::Point2f center() const { return cv::Point2f(bbox.x + bbox.width/2.0f, bbox.y + bbox.height/2.0f); }
+    cv::Point2f center() const { 
+        return cv::Point2f(static_cast<float>(bbox.x) + static_cast<float>(bbox.width)/2.0f, 
+                          static_cast<float>(bbox.y) + static_cast<float>(bbox.height)/2.0f); 
+    }
 };
 
 // Optical flow result

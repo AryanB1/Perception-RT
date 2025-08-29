@@ -128,7 +128,6 @@ void Pipeline::start() {
       float pre_ms  = gpu_elapsed_ms(g.pre_start[last], g.pre_end[last]);
       float inf_ms  = gpu_elapsed_ms(g.inf_start[last], g.inf_end[last]);
       float d2h_ms  = gpu_elapsed_ms(g.d2h_start[last], g.d2h_end[last]);
-      double e2e_ms = 0.0;
 
       metrics_.add_pre(pre_ms);
       metrics_.add_inf(inf_ms);
