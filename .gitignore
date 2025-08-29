@@ -5,3 +5,5 @@ CMakePresets.json
 /build-cpu
 /model/venv
 *.pt
+*.backup
+*.trt

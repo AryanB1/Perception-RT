@@ -1,12 +1,14 @@
 #pragma once
 #include <string>
 
+#include "ml_engine.hpp"
 #include "pipeline.hpp"
 #include "types.hpp"
 
 struct AppConfig {
   PipelineConfig pipeline;
   DeadlineProfile deadline;
+  MLConfig ml_config;
   int metrics_port{9090};
 };
 

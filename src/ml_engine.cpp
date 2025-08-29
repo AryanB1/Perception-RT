@@ -34,8 +34,8 @@ void TRTLogger::log(Severity severity, const char* msg) noexcept {
 }
 
 // TensorRT Engine Implementation
-TensorRTEngine::TensorRTEngine(const std::string& /*onnx_path*/, const MLConfig& config)
-    : logger_(std::make_unique<TRTLogger>()) {
+TensorRTEngine::TensorRTEngine(const std::string& onnx_path, const MLConfig& config)
+    : logger_(std::make_unique<TRTLogger>()), onnx_path_(onnx_path) {
   builder_.reset(nvinfer1::createInferBuilder(*logger_));
   if (!builder_) {
     throw std::runtime_error("Failed to create TensorRT builder");
@@ -77,6 +77,24 @@ bool TensorRTEngine::build() {
     spdlog::error("TensorRT network or config not initialized");
     return false;
   }
+
+  // Parse ONNX model to populate the network
+  auto parser = std::unique_ptr<nvonnxparser::IParser>(nvonnxparser::createParser(*network_, *logger_));
+  if (!parser) {
+    spdlog::error("Failed to create ONNX parser");
+    return false;
+  }
+
+  // Parse the ONNX file
+  if (!parser->parseFromFile(onnx_path_.c_str(), static_cast<int>(nvinfer1::ILogger::Severity::kWARNING))) {
+    spdlog::error("Failed to parse ONNX file: {}", onnx_path_);
+    for (int32_t i = 0; i < parser->getNbErrors(); ++i) {
+      spdlog::error("Parser error {}: {}", i, parser->getError(i)->desc());
+    }
+    return false;
+  }
+
+  spdlog::info("Successfully parsed ONNX model: {}", onnx_path_);
 
   // Build the engine
   engine_.reset(builder_->buildEngineWithConfig(*network_, *config_));
@@ -188,9 +206,18 @@ bool TensorRTEngine::infer(const std::vector<float>& input, std::vector<float>& 
     return false;
   }
 
+  // Set tensor addresses for modern TensorRT API
+  for (int32_t i = 0; i < engine_->getNbIOTensors(); ++i) {
+    const char* tensor_name = engine_->getIOTensorName(i);
+    if (engine_->getTensorIOMode(tensor_name) == nvinfer1::TensorIOMode::kINPUT) {
+      context_->setTensorAddress(tensor_name, d_input_);
+    } else if (engine_->getTensorIOMode(tensor_name) == nvinfer1::TensorIOMode::kOUTPUT) {
+      context_->setTensorAddress(tensor_name, d_output_);
+    }
+  }
+
   // Run inference
-  void* bindings[] = {d_input_, d_output_};
-  if (!context_->executeV2(bindings)) {
+  if (!context_->enqueueV3(stream_)) {
     spdlog::error("TensorRT inference failed");
     return false;
   }
@@ -220,16 +247,43 @@ void TensorRTEngine::allocateBuffers() {
     throw std::runtime_error("Failed to allocate input buffer");
   }
 
-  // For YOLO, output size varies based on model architecture
-  // This is a simplified calculation - should be determined from actual model
-  output_size_ = 25200 * 85;  // Typical YOLOv11 output size
+  // For YOLO v11, calculate actual output size from engine
+  // Using modern TensorRT API (getTensorName, getTensorShape)
+  if (engine_->getNbIOTensors() >= 2) {
+    const char* output_name = nullptr;
+    for (int32_t i = 0; i < engine_->getNbIOTensors(); ++i) {
+      const char* tensor_name = engine_->getIOTensorName(i);
+      if (engine_->getTensorIOMode(tensor_name) == nvinfer1::TensorIOMode::kOUTPUT) {
+        output_name = tensor_name;
+        break;
+      }
+    }
+    
+    if (output_name) {
+      auto output_dims = engine_->getTensorShape(output_name);
+      output_size_ = 1;
+      for (int i = 0; i < output_dims.nbDims; ++i) {
+        output_size_ *= static_cast<size_t>(output_dims.d[i]);
+      }
+      spdlog::info("TensorRT: Output tensor '{}', Output size: {}", output_name, output_size_);
+    } else {
+      // Fallback for YOLO v11s
+      output_size_ = 8400 * 84;  // YOLO v11 output: 8400 detections × 84 elements (4 + 80 classes)
+      spdlog::warn("No output tensor found, using fallback output size: {}", output_size_);
+    }
+  } else {
+    // Fallback for YOLO v11s
+    output_size_ = 8400 * 84;  // YOLO v11 output: 8400 detections × 84 elements (4 + 80 classes)
+    spdlog::warn("Using fallback output size: {}", output_size_);
+  }
+  
   size_t output_bytes = output_size_ * sizeof(float);
   if (cudaMalloc(&d_output_, output_bytes) != cudaSuccess) {
     throw std::runtime_error("Failed to allocate output buffer");
   }
 
-  spdlog::debug("TensorRT buffers allocated: input={}MB, output={}MB", input_bytes / 1024 / 1024,
-                output_bytes / 1024 / 1024);
+  spdlog::debug("TensorRT buffers allocated: input={}MB, output={}MB", 
+                input_bytes / 1024 / 1024, output_bytes / 1024 / 1024);
 }
 
 void TensorRTEngine::freeBuffers() {
@@ -277,15 +331,22 @@ bool MLEngine::initialize() {
       if (config_.enable_detection) {
         yolo_engine_ = std::make_unique<TensorRTEngine>(config_.yolo_model_path, config_);
 
-        // Try to load existing engine, otherwise build new one
-        std::string engine_path = config_.yolo_model_path + ".trt";
-        if (!yolo_engine_->loadEngine(engine_path)) {
-          spdlog::info("Building new TensorRT engine for YOLO...");
-          if (!yolo_engine_->build()) {
-            spdlog::error("Failed to build YOLO TensorRT engine");
-            return false;
+        // Try to load existing engine first (prioritize .engine over .onnx)
+        if (!yolo_engine_->loadEngine(config_.yolo_engine_path)) {
+          spdlog::info("Pre-built TensorRT engine not found at {}", config_.yolo_engine_path);
+          
+          // Try to load the .onnx and build engine
+          std::string engine_path = config_.yolo_model_path + ".trt";
+          if (!yolo_engine_->loadEngine(engine_path)) {
+            spdlog::info("Building new TensorRT engine for YOLO...");
+            if (!yolo_engine_->build()) {
+              spdlog::error("Failed to build YOLO TensorRT engine");
+              return false;
+            }
+            yolo_engine_->saveEngine(engine_path);
           }
-          yolo_engine_->saveEngine(engine_path);
+        } else {
+          spdlog::info("Loaded pre-built TensorRT engine from {}", config_.yolo_engine_path);
         }
       }
 
@@ -511,12 +572,103 @@ cv::Mat MLEngine::preprocessForSegmentation(const cv::Mat& frame) {
   return blob;
 }
 
-std::vector<Detection> MLEngine::postprocessYOLO(const std::vector<float>& /*output*/,
-                                                 const cv::Size& /*original_size*/) {
+std::vector<Detection> MLEngine::postprocessYOLO(const std::vector<float>& output,
+                                                 const cv::Size& original_size) {
   std::vector<Detection> detections;
 
-  // This is a simplified YOLO postprocessing
-  // Real implementation would depend on specific YOLOv11 output format
+  // YOLO v11 output format: [batch, 84, 8400] where 84 = 4 (bbox) + 80 (classes)
+  // The output is transposed compared to earlier YOLO versions
+  const int num_detections = 8400;  // 8400 detections for 640x640 input
+  const int num_classes = 80;       // COCO classes
+  const int output_elements = 4 + num_classes;  // 84 total
+
+  if (output.size() < static_cast<size_t>(num_detections * output_elements)) {
+    spdlog::warn("YOLO output size mismatch: expected {}, got {}", 
+                 num_detections * output_elements, output.size());
+    return detections;
+  }
+
+  std::vector<cv::Rect> boxes;
+  std::vector<float> confidences;
+  std::vector<int> class_ids;
+
+  // Calculate scale factors for coordinate transformation
+  float scale_x = static_cast<float>(original_size.width) / static_cast<float>(config_.input_size.width);
+  float scale_y = static_cast<float>(original_size.height) / static_cast<float>(config_.input_size.height);
+
+  for (int i = 0; i < num_detections; ++i) {
+    // Extract bounding box coordinates (cx, cy, w, h)
+    float cx = output[i * output_elements + 0];
+    float cy = output[i * output_elements + 1];
+    float w = output[i * output_elements + 2];
+    float h = output[i * output_elements + 3];
+
+    // Find the class with maximum confidence
+    float max_confidence = 0.0f;
+    int best_class_id = -1;
+    
+    for (int c = 0; c < num_classes; ++c) {
+      float class_conf = output[i * output_elements + 4 + c];
+      if (class_conf > max_confidence) {
+        max_confidence = class_conf;
+        best_class_id = c;
+      }
+    }
+
+    // Filter by confidence threshold
+    if (max_confidence >= config_.detection_threshold) {
+      // Convert center coordinates to top-left coordinates
+      float x = cx - w / 2.0f;
+      float y = cy - h / 2.0f;
+
+      // Scale coordinates to original image size
+      int bbox_x = static_cast<int>(x * scale_x);
+      int bbox_y = static_cast<int>(y * scale_y);
+      int bbox_w = static_cast<int>(w * scale_x);
+      int bbox_h = static_cast<int>(h * scale_y);
+
+      // Ensure coordinates are within image bounds
+      bbox_x = std::max(0, std::min(bbox_x, original_size.width - 1));
+      bbox_y = std::max(0, std::min(bbox_y, original_size.height - 1));
+      bbox_w = std::min(bbox_w, original_size.width - bbox_x);
+      bbox_h = std::min(bbox_h, original_size.height - bbox_y);
+
+      if (bbox_w > 0 && bbox_h > 0) {
+        boxes.emplace_back(bbox_x, bbox_y, bbox_w, bbox_h);
+        confidences.push_back(max_confidence);
+        class_ids.push_back(best_class_id);
+      }
+    }
+  }
+
+  // Apply Non-Maximum Suppression
+  std::vector<int> nms_indices;
+  cv::dnn::NMSBoxes(boxes, confidences, config_.detection_threshold, 
+                    config_.nms_threshold, nms_indices);
+
+  // Convert to Detection objects
+  for (int idx : nms_indices) {
+    if (idx >= 0 && idx < static_cast<int>(boxes.size())) {
+      Detection det;
+      det.bbox = boxes[idx];
+      det.confidence = confidences[idx];
+      det.class_id = class_ids[idx];
+      
+      // Set label from class names
+      if (det.class_id >= 0 && det.class_id < static_cast<int>(class_names_.size())) {
+        det.label = class_names_[det.class_id];
+      } else {
+        det.label = "unknown";
+      }
+      
+      detections.push_back(det);
+      
+      // Limit number of detections
+      if (static_cast<int>(detections.size()) >= config_.max_detections) {
+        break;
+      }
+    }
+  }
 
   return detections;
 }

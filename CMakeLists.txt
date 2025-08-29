@@ -72,7 +72,7 @@ find_package(CUDAToolkit REQUIRED)
 message(STATUS "CUDAToolkit found: ${CUDAToolkit_VERSION}")
 
 # OpenCV (required)
-find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio dnn)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio dnn video)
 message(STATUS "OpenCV found: ${OpenCV_VERSION}")
 if(OpenCV_VERSION VERSION_GREATER_EQUAL "4.5.0")
   message(STATUS "OpenCV DNN module available for ML inference")

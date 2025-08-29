@@ -16,7 +16,8 @@ telemetry:
   metrics_port: 9090
 ml_engine:
   # Model paths (relative to project root)
-  yolo_model_path: "models/yolov11n.onnx"
+  yolo_model_path: "model/yolo/yolo11s.onnx"
+  yolo_engine_path: "model/yolo/yolo11s.engine"
   segmentation_model_path: "models/deeplabv3.onnx"
   
   # TensorRT settings

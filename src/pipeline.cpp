@@ -15,8 +15,16 @@ using namespace std::chrono;
 
 #include "gpu.hpp"
 
-Pipeline::Pipeline(PipelineConfig cfg, DeadlineProfile dl, MetricsRegistry& m)
-    : cfg_(std::move(cfg)), dl_(dl), metrics_(m) {}
+Pipeline::Pipeline(PipelineConfig cfg, DeadlineProfile dl, MetricsRegistry& m, const MLConfig& ml_cfg)
+    : cfg_(std::move(cfg)), dl_(dl), metrics_(m) {
+  // Initialize ML Engine
+  ml_engine_ = createMLEngine(ml_cfg);
+  if (!ml_engine_->initialize()) {
+    spdlog::error("Failed to initialize ML Engine");
+    throw std::runtime_error("ML Engine initialization failed");
+  }
+  spdlog::info("ML Engine initialized successfully");
+}
 
 bool Pipeline::open() {
   if (cfg_.uri.empty()) return false;
@@ -125,11 +133,28 @@ void Pipeline::start() {
         // Get motion detection results from GPU
         GpuMotionResult motion_result = gpu_get_motion_result(g, prev);
 
+        // Run ML inference (YOLO) on the current frame
+        MLResult ml_result;
+        if (ml_engine_) {
+          // Convert GPU frame back to OpenCV Mat for ML processing
+          cv::Mat cv_frame(g.H, g.W, CV_8UC3);
+          // Note: In a real implementation, you'd need to copy the frame data from GPU
+          // For now, we'll use the original resized frame
+          cv::Mat ml_resized, bgr_frame;
+          cv::resize(raw, ml_resized, cv::Size(g.W, g.H));
+          cv::cvtColor(ml_resized, bgr_frame, cv::COLOR_BGR2RGB);
+          cv::cvtColor(bgr_frame, cv_frame, cv::COLOR_RGB2BGR);
+          
+          ml_result = ml_engine_->process(cv_frame);
+        }
+
         spdlog::info(
             "frame_id={} [CUDA] pre_ms={:.3f} inf_ms={:.3f} post(D2H)_ms={:.3f} e2e_ms={:.3f} "
-            "missed={} motion_detected={} motion_intensity={:.4f} motion_pixels={}",
+            "missed={} motion_detected={} motion_intensity={:.4f} motion_pixels={} "
+            "ml_objects={} ml_time={:.3f}ms",
             frame_id - 1, pre_ms, inf_ms, d2h_ms, e2e_ms, missed, motion_result.motion_detected,
-            motion_result.motion_intensity, motion_result.motion_pixels);
+            motion_result.motion_intensity, motion_result.motion_pixels,
+            ml_result.total_objects, ml_result.inference_time_ms);
       } else {
         first_launched = true;
       }

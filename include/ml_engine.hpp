@@ -76,7 +76,8 @@ struct MLResult {
 // ML Engine configuration
 struct MLConfig {
   // Model paths
-  std::string yolo_model_path = "models/yolov11n.onnx";
+  std::string yolo_model_path = "model/yolo/yolo11s.onnx";
+  std::string yolo_engine_path = "model/yolo/yolo11s.engine";
   std::string segmentation_model_path = "models/deeplabv3.onnx";
 
   // TensorRT settings
@@ -138,6 +139,7 @@ private:
 
   std::unique_ptr<TRTLogger> logger_;
 
+  std::string onnx_path_;
   cv::Size input_size_;
   size_t input_channels_;
   size_t output_size_;

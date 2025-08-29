@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
 
   AppConfig app = load_config(cfg_path);
   MetricsRegistry metrics;
-  Pipeline pipe(app.pipeline, app.deadline, metrics);
+  Pipeline pipe(app.pipeline, app.deadline, metrics, app.ml_config);
 
   if (!pipe.open()) {
     spdlog::error("Failed to open input. Exiting.");
