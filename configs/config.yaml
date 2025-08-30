@@ -1,7 +1,7 @@
 input:
-  uri: "data/sample_1080p30.mp4"
-  width: 1920
-  height: 1080
+  uri: "data/4k_dashcam.mp4"
+  width: 3840
+  height: 2160
   fps: 30
 pipeline:
   budget_ms: 33.0
@@ -26,10 +26,15 @@ ml_engine:
   max_batch_size: 1
   max_workspace_size: 1073741824  # 1GB
   
-  # Detection settings
-  detection_threshold: 0.5
+  # Detection settings - tuned for vehicle detection
+  detection_threshold: 0.3  # Lower threshold for vehicles
   nms_threshold: 0.4
-  max_detections: 100
+  max_detections: 50  # Reasonable for dashcam scenarios
+  
+  # Vehicle-specific classes filter (COCO indices)
+  # 1: bicycle, 2: car, 3: motorcycle, 5: bus, 7: truck
+  vehicle_classes: [1, 2, 3, 5, 7]
+  focus_vehicle_detection: true
   
   # Optical flow settings
   max_corners: 100
@@ -42,7 +47,42 @@ ml_engine:
   input_width: 640
   input_height: 640
   
-  # Feature toggles
+  # Feature toggles - optimized for vehicle analytics
   enable_detection: true
   enable_optical_flow: true
-  enable_segmentation: false  # Disabled by default for performance
+  enable_segmentation: false  # Disabled for performance
+  enable_vehicle_analytics: true  # New: vehicle-specific analytics
+  enable_tracking: true  # New: object tracking for vehicles
+  enable_proximity_detection: true  # New: detect vehicles getting close
+
+# Logging and Output Configuration
+output:
+  logging:
+    # Enable/disable verbose per-frame logging
+    verbose_logging: false
+    
+    # Performance summary interval (seconds)
+    performance_summary_interval: 30
+    
+    # Log collision warnings
+    log_collision_warnings: true
+  
+  # Video output settings
+  enable_video_output: true
+  output_video_path: "output/dashcam_analytics.mp4"
+  video_codec: "mp4v"  # FOURCC codec
+  output_fps: 30
+  
+  # Memory buffering settings
+  use_memory_buffering: true
+  max_buffered_frames: 10000  # ~5 minutes at 30fps
+  buffer_flush_threshold: 1000  # Write to disk when this many frames are buffered
+  
+  # Overlay settings
+  enable_overlay: true
+  show_vehicle_boxes: true
+  show_tracking_ids: true
+  show_analytics_panel: true
+  show_collision_warnings: true
+  show_lane_detection: false  # Placeholder implementation
+  overlay_opacity: 0.8

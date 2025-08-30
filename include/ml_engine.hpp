@@ -17,6 +17,9 @@ struct MLResult;
 struct Detection;
 struct OpticalFlowResult;
 struct SegmentationResult;
+struct VehicleAnalyticsResult;
+class VehicleAnalytics;
+struct VehicleAnalyticsConfig;
 
 // Detection result for object detection
 struct Detection {
@@ -61,6 +64,10 @@ struct MLResult {
   // Semantic Segmentation
   SegmentationResult segmentation;
 
+  // Vehicle Analytics (new)
+  std::unique_ptr<VehicleAnalyticsResult> vehicle_analytics;
+  bool vehicle_analytics_enabled{false};
+
   // Motion Analysis (enhanced)
   bool motion_detected{false};
   float motion_intensity{0.0f};
@@ -103,6 +110,13 @@ struct MLConfig {
   bool enable_detection = true;
   bool enable_optical_flow = true;
   bool enable_segmentation = false;  // Disabled by default due to computational cost
+
+  // Vehicle analytics settings
+  bool enable_vehicle_analytics = false;
+  bool enable_tracking = false;
+  bool enable_proximity_detection = false;
+  std::vector<int> vehicle_classes{1, 2, 3, 5, 7};  // COCO class IDs for vehicles
+  bool focus_vehicle_detection = false;
 };
 
 // TensorRT Logger
@@ -200,6 +214,9 @@ private:
   cv::Ptr<cv::SparsePyrLKOpticalFlow> optical_flow_tracker_;
   std::vector<cv::Point2f> prev_points_;
   cv::Mat prev_gray_;
+
+  // Vehicle analytics engine
+  std::unique_ptr<VehicleAnalytics> vehicle_analytics_;
 
   // YOLO class names
   std::vector<std::string> class_names_;

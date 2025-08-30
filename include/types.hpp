@@ -35,3 +35,6 @@ struct StreamPlan {
   int preprocess_priority{-1};
   int infer_priority{-2};
 };
+
+// Forward declaration for OutputConfig
+struct OutputConfig;

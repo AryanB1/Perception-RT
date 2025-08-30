@@ -7,6 +7,7 @@
 
 #include "metrics.hpp"
 #include "ml_engine.hpp"
+#include "output_manager.hpp"
 #include "types.hpp"
 
 struct PipelineConfig {
@@ -20,7 +21,8 @@ struct PipelineConfig {
 
 class Pipeline {
 public:
-  Pipeline(PipelineConfig cfg, DeadlineProfile dl, MetricsRegistry& m, const MLConfig& ml_cfg);
+  Pipeline(PipelineConfig cfg, DeadlineProfile dl, MetricsRegistry& m, const MLConfig& ml_cfg,
+           const OutputConfig& output_cfg);
   bool open();   // Validate input availability
   void start();  // Start processing loop in a background thread
   void stop();   // Stop and join thread
@@ -38,6 +40,7 @@ private:
   DeadlineProfile dl_;
   MetricsRegistry& metrics_;
   std::unique_ptr<MLEngine> ml_engine_;
+  std::unique_ptr<OutputManager> output_manager_;
 
   mutable std::mutex stat_mu_;
   StatSnapshot last_stats_{};

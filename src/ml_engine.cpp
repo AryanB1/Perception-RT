@@ -8,6 +8,8 @@
 #include <fstream>
 #include <numeric>
 
+#include "vehicle_analytics.hpp"
+
 using namespace std::chrono;
 
 // TensorRT Logger Implementation
@@ -79,14 +81,16 @@ bool TensorRTEngine::build() {
   }
 
   // Parse ONNX model to populate the network
-  auto parser = std::unique_ptr<nvonnxparser::IParser>(nvonnxparser::createParser(*network_, *logger_));
+  auto parser =
+      std::unique_ptr<nvonnxparser::IParser>(nvonnxparser::createParser(*network_, *logger_));
   if (!parser) {
     spdlog::error("Failed to create ONNX parser");
     return false;
   }
 
   // Parse the ONNX file
-  if (!parser->parseFromFile(onnx_path_.c_str(), static_cast<int>(nvinfer1::ILogger::Severity::kWARNING))) {
+  if (!parser->parseFromFile(onnx_path_.c_str(),
+                             static_cast<int>(nvinfer1::ILogger::Severity::kWARNING))) {
     spdlog::error("Failed to parse ONNX file: {}", onnx_path_);
     for (int32_t i = 0; i < parser->getNbErrors(); ++i) {
       spdlog::error("Parser error {}: {}", i, parser->getError(i)->desc());
@@ -258,7 +262,7 @@ void TensorRTEngine::allocateBuffers() {
         break;
       }
     }
-    
+
     if (output_name) {
       auto output_dims = engine_->getTensorShape(output_name);
       output_size_ = 1;
@@ -276,14 +280,14 @@ void TensorRTEngine::allocateBuffers() {
     output_size_ = 8400 * 84;  // YOLO v11 output: 8400 detections × 84 elements (4 + 80 classes)
     spdlog::warn("Using fallback output size: {}", output_size_);
   }
-  
+
   size_t output_bytes = output_size_ * sizeof(float);
   if (cudaMalloc(&d_output_, output_bytes) != cudaSuccess) {
     throw std::runtime_error("Failed to allocate output buffer");
   }
 
-  spdlog::debug("TensorRT buffers allocated: input={}MB, output={}MB", 
-                input_bytes / 1024 / 1024, output_bytes / 1024 / 1024);
+  spdlog::debug("TensorRT buffers allocated: input={}MB, output={}MB", input_bytes / 1024 / 1024,
+                output_bytes / 1024 / 1024);
 }
 
 void TensorRTEngine::freeBuffers() {
@@ -325,6 +329,18 @@ bool MLEngine::initialize() {
   // Load class names for YOLO
   loadClassNames();
 
+  // Initialize vehicle analytics if enabled
+  if (config_.enable_vehicle_analytics) {
+    VehicleAnalyticsConfig va_config;
+    va_config.vehicle_classes = config_.vehicle_classes;
+    va_config.focus_vehicle_detection = config_.focus_vehicle_detection;
+    va_config.enable_tracking = config_.enable_tracking;
+    va_config.enable_proximity_detection = config_.enable_proximity_detection;
+
+    vehicle_analytics_ = createVehicleAnalytics(va_config);
+    spdlog::info("Vehicle Analytics initialized");
+  }
+
   if (config_.use_tensorrt) {
     try {
       // Initialize YOLO engine
@@ -334,7 +350,7 @@ bool MLEngine::initialize() {
         // Try to load existing engine first (prioritize .engine over .onnx)
         if (!yolo_engine_->loadEngine(config_.yolo_engine_path)) {
           spdlog::info("Pre-built TensorRT engine not found at {}", config_.yolo_engine_path);
-          
+
           // Try to load the .onnx and build engine
           std::string engine_path = config_.yolo_model_path + ".trt";
           if (!yolo_engine_->loadEngine(engine_path)) {
@@ -377,6 +393,8 @@ bool MLEngine::initialize() {
   spdlog::info("  - Object Detection: {}", config_.enable_detection ? "Enabled" : "Disabled");
   spdlog::info("  - Optical Flow: {}", config_.enable_optical_flow ? "Enabled" : "Disabled");
   spdlog::info("  - Segmentation: {}", config_.enable_segmentation ? "Enabled" : "Disabled");
+  spdlog::info("  - Vehicle Analytics: {}",
+               config_.enable_vehicle_analytics ? "Enabled" : "Disabled");
   spdlog::info("  - TensorRT: {}", config_.use_tensorrt ? "Enabled" : "Disabled");
 
   return true;
@@ -420,8 +438,29 @@ MLResult MLEngine::process(const cv::Mat& frame) {
     result.inference_time_ms += seg_time;
   }
 
+  // Vehicle Analytics
+  if (config_.enable_vehicle_analytics && vehicle_analytics_) {
+    startTimer();
+    auto va_result = vehicle_analytics_->analyze(frame, result.detections);
+    result.vehicle_analytics = std::make_unique<VehicleAnalyticsResult>(std::move(va_result));
+    result.vehicle_analytics_enabled = true;
+    float va_time = getElapsedMs();
+    result.inference_time_ms += va_time;
+
+    spdlog::debug("Vehicle Analytics: {} vehicles, {} tracks, processing time: {:.2f}ms",
+                  result.vehicle_analytics->total_vehicles,
+                  result.vehicle_analytics->active_tracks.size(), va_time);
+  }
+
   // Enhanced motion analysis combining all modalities
   result.motion_detected = result.significant_motion || result.total_objects > 0;
+  if (result.vehicle_analytics_enabled && result.vehicle_analytics) {
+    // Include vehicle analytics in motion detection
+    result.motion_detected = result.motion_detected ||
+                             !result.vehicle_analytics->approaching_vehicles.empty() ||
+                             !result.vehicle_analytics->danger_zone_vehicles.empty();
+  }
+
   if (result.motion_detected) {
     // Calculate motion intensity from optical flow and detections
     result.motion_intensity = std::min(1.0f, result.optical_flow.magnitude_mean / 10.0f +
@@ -578,13 +617,13 @@ std::vector<Detection> MLEngine::postprocessYOLO(const std::vector<float>& outpu
 
   // YOLO v11 output format: [batch, 84, 8400] where 84 = 4 (bbox) + 80 (classes)
   // The output is transposed compared to earlier YOLO versions
-  const int num_detections = 8400;  // 8400 detections for 640x640 input
-  const int num_classes = 80;       // COCO classes
+  const int num_detections = 8400;              // 8400 detections for 640x640 input
+  const int num_classes = 80;                   // COCO classes
   const int output_elements = 4 + num_classes;  // 84 total
 
   if (output.size() < static_cast<size_t>(num_detections * output_elements)) {
-    spdlog::warn("YOLO output size mismatch: expected {}, got {}", 
-                 num_detections * output_elements, output.size());
+    spdlog::warn("YOLO output size mismatch: expected {}, got {}", num_detections * output_elements,
+                 output.size());
     return detections;
   }
 
@@ -593,8 +632,10 @@ std::vector<Detection> MLEngine::postprocessYOLO(const std::vector<float>& outpu
   std::vector<int> class_ids;
 
   // Calculate scale factors for coordinate transformation
-  float scale_x = static_cast<float>(original_size.width) / static_cast<float>(config_.input_size.width);
-  float scale_y = static_cast<float>(original_size.height) / static_cast<float>(config_.input_size.height);
+  float scale_x =
+      static_cast<float>(original_size.width) / static_cast<float>(config_.input_size.width);
+  float scale_y =
+      static_cast<float>(original_size.height) / static_cast<float>(config_.input_size.height);
 
   for (int i = 0; i < num_detections; ++i) {
     // Extract bounding box coordinates (cx, cy, w, h)
@@ -606,7 +647,7 @@ std::vector<Detection> MLEngine::postprocessYOLO(const std::vector<float>& outpu
     // Find the class with maximum confidence
     float max_confidence = 0.0f;
     int best_class_id = -1;
-    
+
     for (int c = 0; c < num_classes; ++c) {
       float class_conf = output[i * output_elements + 4 + c];
       if (class_conf > max_confidence) {
@@ -643,8 +684,8 @@ std::vector<Detection> MLEngine::postprocessYOLO(const std::vector<float>& outpu
 
   // Apply Non-Maximum Suppression
   std::vector<int> nms_indices;
-  cv::dnn::NMSBoxes(boxes, confidences, config_.detection_threshold, 
-                    config_.nms_threshold, nms_indices);
+  cv::dnn::NMSBoxes(boxes, confidences, config_.detection_threshold, config_.nms_threshold,
+                    nms_indices);
 
   // Convert to Detection objects
   for (int idx : nms_indices) {
@@ -653,16 +694,16 @@ std::vector<Detection> MLEngine::postprocessYOLO(const std::vector<float>& outpu
       det.bbox = boxes[idx];
       det.confidence = confidences[idx];
       det.class_id = class_ids[idx];
-      
+
       // Set label from class names
       if (det.class_id >= 0 && det.class_id < static_cast<int>(class_names_.size())) {
         det.label = class_names_[det.class_id];
       } else {
         det.label = "unknown";
       }
-      
+
       detections.push_back(det);
-      
+
       // Limit number of detections
       if (static_cast<int>(detections.size()) >= config_.max_detections) {
         break;
@@ -806,6 +847,33 @@ cv::Mat drawComprehensiveResults(const cv::Mat& frame, const MLResult& result) {
 
   // Draw segmentation
   output = drawSegmentation(output, result.segmentation);
+
+  // Draw vehicle analytics if enabled
+  if (result.vehicle_analytics_enabled && result.vehicle_analytics) {
+    // This would require including vehicle_analytics.hpp or forward declaring the viz functions
+    // For now, we'll add basic vehicle info overlay
+
+    // Add vehicle analytics info
+    std::string va_text =
+        "Vehicles: " + std::to_string(result.vehicle_analytics->total_vehicles) +
+        " | Tracks: " + std::to_string(result.vehicle_analytics->active_tracks.size());
+    cv::putText(output, va_text, cv::Point(10, 90), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                cv::Scalar(255, 255, 255), 2);
+
+    if (result.vehicle_analytics->collision_warning) {
+      cv::putText(output, "COLLISION WARNING!", cv::Point(frame.cols / 2 - 150, 50),
+                  cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 0, 255), 3);
+    }
+
+    // Highlight vehicles in danger zone
+    for (const auto& track : result.vehicle_analytics->active_tracks) {
+      auto it = std::find(result.vehicle_analytics->danger_zone_vehicles.begin(),
+                          result.vehicle_analytics->danger_zone_vehicles.end(), track.track_id);
+      if (it != result.vehicle_analytics->danger_zone_vehicles.end()) {
+        cv::rectangle(output, track.current_bbox, cv::Scalar(0, 0, 255), 4);  // Red highlight
+      }
+    }
+  }
 
   // Add performance info
   std::string perf_text =

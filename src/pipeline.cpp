@@ -8,6 +8,7 @@
 #include "ml_engine.hpp"
 #include "motion_detector.hpp"
 #include "types.hpp"
+#include "vehicle_analytics.hpp"
 
 using namespace std::chrono;
 
@@ -15,7 +16,8 @@ using namespace std::chrono;
 
 #include "gpu.hpp"
 
-Pipeline::Pipeline(PipelineConfig cfg, DeadlineProfile dl, MetricsRegistry& m, const MLConfig& ml_cfg)
+Pipeline::Pipeline(PipelineConfig cfg, DeadlineProfile dl, MetricsRegistry& m,
+                   const MLConfig& ml_cfg, const OutputConfig& output_cfg)
     : cfg_(std::move(cfg)), dl_(dl), metrics_(m) {
   // Initialize ML Engine
   ml_engine_ = createMLEngine(ml_cfg);
@@ -24,6 +26,9 @@ Pipeline::Pipeline(PipelineConfig cfg, DeadlineProfile dl, MetricsRegistry& m, c
     throw std::runtime_error("ML Engine initialization failed");
   }
   spdlog::info("ML Engine initialized successfully");
+
+  // Initialize Output Manager
+  output_manager_ = std::make_unique<OutputManager>(output_cfg);
 }
 
 bool Pipeline::open() {
@@ -71,6 +76,14 @@ void Pipeline::start() {
     spdlog::info("Starting pipeline with CUDA/GPU processing path");
     GpuContext g;
     gpu_init(g, /*W*/ 640, /*H*/ 640, /*C*/ 3, /*iters*/ 32);
+
+    // Initialize output manager with frame dimensions
+    if (!output_manager_->initialize(cfg_.width, cfg_.height)) {
+      spdlog::error("Failed to initialize output manager");
+      running_ = false;
+      return;
+    }
+
     std::array<TimePoint, 2> t_cap{};
     bool first_launched = false;
 
@@ -82,9 +95,8 @@ void Pipeline::start() {
       cv::Mat raw;
       cap >> raw;
       if (raw.empty()) {
-        spdlog::warn("End of stream or empty frame.");
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        continue;
+        spdlog::info("End of video stream reached after {} frames", frame_id);
+        break;  // Exit loop instead of continuing
       }
       cv::Mat resized, rgb;
       cv::resize(raw, resized, cv::Size(g.W, g.H));
@@ -144,17 +156,14 @@ void Pipeline::start() {
           cv::resize(raw, ml_resized, cv::Size(g.W, g.H));
           cv::cvtColor(ml_resized, bgr_frame, cv::COLOR_BGR2RGB);
           cv::cvtColor(bgr_frame, cv_frame, cv::COLOR_RGB2BGR);
-          
+
           ml_result = ml_engine_->process(cv_frame);
         }
 
-        spdlog::info(
-            "frame_id={} [CUDA] pre_ms={:.3f} inf_ms={:.3f} post(D2H)_ms={:.3f} e2e_ms={:.3f} "
-            "missed={} motion_detected={} motion_intensity={:.4f} motion_pixels={} "
-            "ml_objects={} ml_time={:.3f}ms",
-            frame_id - 1, pre_ms, inf_ms, d2h_ms, e2e_ms, missed, motion_result.motion_detected,
-            motion_result.motion_intensity, motion_result.motion_pixels,
-            ml_result.total_objects, ml_result.inference_time_ms);
+        // Use OutputManager instead of direct logging
+        output_manager_->processFrame(raw,  // Use original frame for output
+                                      ml_result, motion_result, frame_id - 1, pre_ms, inf_ms,
+                                      d2h_ms, e2e_ms, missed);
       } else {
         first_launched = true;
       }
@@ -177,6 +186,10 @@ void Pipeline::start() {
       metrics_.add_inf(inf_ms);
       metrics_.add_post(d2h_ms);
     }
+
+    // Ensure proper cleanup of output manager
+    spdlog::info("Pipeline processing completed. Finalizing outputs...");
+    output_manager_->cleanup();
 
     gpu_destroy(g);
   });
