@@ -90,12 +90,22 @@ AppConfig load_config(const std::string& path) {
     auto output = y["output"];
 
     // Logging settings
-    if (output["verbose_logging"])
-      c.output_config.verbose_logging = output["verbose_logging"].as<bool>();
-    if (output["log_level"]) c.output_config.log_level = output["log_level"].as<std::string>();
-    if (output["performance_summary_interval"])
+    if (output["logging"] && output["logging"]["verbose_logging"])
+      c.output_config.verbose_logging = output["logging"]["verbose_logging"].as<bool>();
+    if (output["logging"] && output["logging"]["performance_summary_interval"])
       c.output_config.performance_summary_interval =
-          output["performance_summary_interval"].as<int>();
+          output["logging"]["performance_summary_interval"].as<int>();
+
+    // CSV logging settings
+    if (output["csv"]) {
+      auto csv = output["csv"];
+      if (csv["enable_csv_logging"])
+        c.output_config.enable_csv_logging = csv["enable_csv_logging"].as<bool>();
+      if (csv["csv_output_path"])
+        c.output_config.csv_output_path = csv["csv_output_path"].as<std::string>();
+      if (csv["csv_comprehensive_mode"])
+        c.output_config.csv_comprehensive_mode = csv["csv_comprehensive_mode"].as<bool>();
+    }
 
     // Video output settings
     if (output["enable_video_output"])

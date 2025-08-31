@@ -67,6 +67,14 @@ output:
     # Log collision warnings
     log_collision_warnings: true
   
+  # CSV logging settings
+  csv:
+    # Enable comprehensive CSV logging (logs all frame data)
+    enable_csv_logging: true
+    csv_output_path: "output/compact_frame_log.csv"
+    # Comprehensive mode logs all fields vs compact mode
+    csv_comprehensive_mode: false
+  
   # Video output settings
   enable_video_output: true
   output_video_path: "output/dashcam_analytics.mp4"

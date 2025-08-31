@@ -4,12 +4,14 @@
 
 #include <filesystem>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 
 #include "vehicle_analytics.hpp"
 
 OutputManager::OutputManager(const OutputConfig& config)
-    : config_(config), frame_width_(0), frame_height_(0), video_writer_initialized_(false) {
+    : config_(config), frame_width_(0), frame_height_(0), csv_header_written_(false),
+      video_writer_initialized_(false) {
   // Set logging level
   if (config_.log_level == "debug") {
     spdlog::set_level(spdlog::level::debug);
@@ -23,6 +25,11 @@ OutputManager::OutputManager(const OutputConfig& config)
 
   stats_.reset();
 
+  // Initialize CSV logging
+  if (config_.enable_csv_logging) {
+    initializeCSV();
+  }
+
   // Reserve space for frame buffer if memory buffering is enabled
   if (config_.use_memory_buffering && config_.enable_video_output) {
     buffered_frames_.reserve(config_.max_buffered_frames);
@@ -31,7 +38,9 @@ OutputManager::OutputManager(const OutputConfig& config)
   }
 }
 
-OutputManager::~OutputManager() { cleanup(); }
+OutputManager::~OutputManager() { 
+  cleanup(); 
+}
 
 bool OutputManager::initialize(int frame_width, int frame_height) {
   frame_width_ = frame_width;
@@ -60,6 +69,9 @@ void OutputManager::cleanup() {
   // Write all buffered frames to video file
   finalizeVideo();
 
+  // Close CSV file
+  closeCSV();
+
   // Final performance summary
   logPerformanceSummary(true);
 }
@@ -81,6 +93,15 @@ void OutputManager::processFrame(const cv::Mat& frame, const MLResult& ml_result
     if (ml_result.vehicle_analytics->collision_warning) {
       stats_.collision_warnings++;
     }
+  }
+
+  // Calculate video timestamp (frame_id / fps)
+  float video_timestamp_sec = static_cast<float>(frame_id) / 30.0f;  // Assuming 30fps
+
+  // Write comprehensive CSV log entry
+  if (config_.enable_csv_logging) {
+    writeCSVRow(frame_id, video_timestamp_sec, pre_ms, inf_ms, post_ms, e2e_ms, missed, 
+                motion_result, ml_result);
   }
 
   // Handle logging
@@ -443,5 +464,208 @@ std::string OutputManager::getVehicleTypeName(VehicleType type) {
       return "Bicycle";
     default:
       return "Vehicle";
+  }
+}
+
+void OutputManager::initializeCSV() {
+  if (!config_.enable_csv_logging) return;
+
+  // Ensure output directory exists
+  std::filesystem::path csv_path(config_.csv_output_path);
+  std::filesystem::path directory = csv_path.parent_path();
+  
+  if (!directory.empty() && !std::filesystem::exists(directory)) {
+    std::filesystem::create_directories(directory);
+    spdlog::info("Created CSV output directory: {}", directory.string());
+  }
+
+  // Open CSV file
+  csv_file_.open(config_.csv_output_path, std::ios::out | std::ios::trunc);
+  if (!csv_file_.is_open()) {
+    spdlog::error("Failed to open CSV file for writing: {}", config_.csv_output_path);
+    return;
+  }
+
+  // Write CSV header
+  writeCSVHeader();
+  csv_header_written_ = true;
+  
+  spdlog::info("CSV logging initialized: {}", config_.csv_output_path);
+}
+
+void OutputManager::writeCSVHeader() {
+  if (!csv_file_.is_open()) return;
+
+  if (config_.csv_comprehensive_mode) {
+    // Comprehensive CSV header with all possible fields
+    csv_file_ << "frame_id,video_timestamp_sec,pre_process_ms,inference_ms,post_process_ms,"
+              << "end_to_end_ms,deadline_missed,motion_detected,motion_intensity,motion_pixels,"
+              << "motion_bbox_x,motion_bbox_y,motion_bbox_w,motion_bbox_h,"
+              << "total_objects,max_confidence,significant_motion,"
+              << "vehicles_detected,active_tracks,approaching_vehicles,danger_zone_vehicles,"
+              << "overtaking_vehicles,vehicles_in_ego_lane,ego_lane_clear,"
+              << "traffic_density,collision_warning,lane_change_safe,closest_vehicle_distance,"
+              << "analytics_time_ms,tracks_updated,new_tracks,lost_tracks,"
+              << "current_fps,avg_inference_time,total_frames_processed,"
+              << "cumulative_vehicles_detected,cumulative_collision_warnings,"
+              << "track_details,detection_details\n";
+  } else {
+    // Compact CSV header (similar to existing format)
+    csv_file_ << "frame_id,video_timestamp_sec,pre_process_ms,inference_ms,post_process_ms,"
+              << "end_to_end_ms,deadline_missed,motion_detected,motion_intensity,"
+              << "total_objects,vehicles_detected,active_tracks,approaching_vehicles,"
+              << "danger_zone_vehicles,traffic_density,collision_warning,"
+              << "current_fps,avg_inference_time,total_frames_processed\n";
+  }
+  
+  csv_file_.flush();
+}
+
+void OutputManager::writeCSVRow(uint64_t frame_id, float video_timestamp_sec, float pre_ms, 
+                                float inf_ms, float post_ms, float e2e_ms, bool missed,
+                                const GpuMotionResult& motion_result, const MLResult& ml_result) {
+  if (!csv_file_.is_open()) return;
+
+  // Basic timing and frame info
+  csv_file_ << frame_id << ","
+            << std::fixed << std::setprecision(3) << video_timestamp_sec << ","
+            << std::fixed << std::setprecision(3) << pre_ms << ","
+            << std::fixed << std::setprecision(3) << inf_ms << ","
+            << std::fixed << std::setprecision(3) << post_ms << ","
+            << std::fixed << std::setprecision(3) << e2e_ms << ","
+            << (missed ? 1 : 0) << ","
+            << (motion_result.motion_detected ? 1 : 0) << ","
+            << std::fixed << std::setprecision(3) << motion_result.motion_intensity;
+
+  if (config_.csv_comprehensive_mode) {
+    // Extended motion information
+    csv_file_ << "," << motion_result.motion_pixels
+              << "," << ml_result.motion_bbox.x
+              << "," << ml_result.motion_bbox.y  
+              << "," << ml_result.motion_bbox.width
+              << "," << ml_result.motion_bbox.height;
+  }
+
+  // Object detection info
+  csv_file_ << "," << ml_result.total_objects
+            << "," << std::fixed << std::setprecision(3) << ml_result.max_confidence;
+
+  if (config_.csv_comprehensive_mode) {
+    csv_file_ << "," << (ml_result.significant_motion ? 1 : 0);
+  }
+
+  // Vehicle analytics
+  int vehicles_detected = 0;
+  int active_tracks = 0;
+  int approaching_vehicles = 0;
+  int danger_zone_vehicles = 0;
+  int overtaking_vehicles = 0;
+  int vehicles_in_ego_lane = 0;
+  bool ego_lane_clear = true;
+  float traffic_density = 0.0f;
+  bool collision_warning = false;
+  bool lane_change_safe = true;
+  float closest_vehicle_distance = std::numeric_limits<float>::max();
+  float analytics_time_ms = 0.0f;
+  int tracks_updated = 0;
+  int new_tracks = 0;
+  int lost_tracks = 0;
+
+  if (ml_result.vehicle_analytics_enabled && ml_result.vehicle_analytics) {
+    const auto& analytics = *ml_result.vehicle_analytics;
+    vehicles_detected = analytics.total_vehicles;
+    active_tracks = static_cast<int>(analytics.active_tracks.size());
+    approaching_vehicles = static_cast<int>(analytics.approaching_vehicles.size());
+    danger_zone_vehicles = static_cast<int>(analytics.danger_zone_vehicles.size());
+    overtaking_vehicles = static_cast<int>(analytics.overtaking_vehicles.size());
+    vehicles_in_ego_lane = analytics.vehicles_in_ego_lane;
+    ego_lane_clear = analytics.ego_lane_clear;
+    traffic_density = analytics.traffic_density;
+    collision_warning = analytics.collision_warning;
+    lane_change_safe = analytics.lane_change_safe;
+    closest_vehicle_distance = analytics.closest_vehicle_distance;
+    analytics_time_ms = analytics.analytics_time_ms;
+    tracks_updated = analytics.tracks_updated;
+    new_tracks = analytics.new_tracks;
+    lost_tracks = analytics.lost_tracks;
+  }
+
+  csv_file_ << "," << vehicles_detected
+            << "," << active_tracks
+            << "," << approaching_vehicles
+            << "," << danger_zone_vehicles;
+
+  if (config_.csv_comprehensive_mode) {
+    csv_file_ << "," << overtaking_vehicles
+              << "," << vehicles_in_ego_lane
+              << "," << (ego_lane_clear ? 1 : 0);
+  }
+
+  csv_file_ << "," << std::fixed << std::setprecision(3) << traffic_density
+            << "," << (collision_warning ? 1 : 0);
+
+  if (config_.csv_comprehensive_mode) {
+    csv_file_ << "," << (lane_change_safe ? 1 : 0)
+              << "," << std::fixed << std::setprecision(3) << closest_vehicle_distance
+              << "," << std::fixed << std::setprecision(3) << analytics_time_ms
+              << "," << tracks_updated
+              << "," << new_tracks
+              << "," << lost_tracks;
+  }
+
+  // Performance metrics
+  csv_file_ << "," << std::fixed << std::setprecision(3) << stats_.getFPS()
+            << "," << std::fixed << std::setprecision(3) << stats_.getAvgInferenceTime()
+            << "," << stats_.total_frames;
+
+  if (config_.csv_comprehensive_mode) {
+    csv_file_ << "," << stats_.vehicles_detected
+              << "," << stats_.collision_warnings;
+
+    // Detailed track information (JSON-like format)
+    csv_file_ << ",\"[";
+    if (ml_result.vehicle_analytics_enabled && ml_result.vehicle_analytics) {
+      bool first_track = true;
+      for (const auto& track : ml_result.vehicle_analytics->active_tracks) {
+        if (!first_track) csv_file_ << ",";
+        csv_file_ << "{id:" << track.track_id
+                  << ",type:" << static_cast<int>(track.type)
+                  << ",conf:" << std::fixed << std::setprecision(2) << track.confidence
+                  << ",speed:" << std::fixed << std::setprecision(1) << track.speed_estimate
+                  << ",x:" << track.current_bbox.x
+                  << ",y:" << track.current_bbox.y
+                  << ",w:" << track.current_bbox.width
+                  << ",h:" << track.current_bbox.height << "}";
+        first_track = false;
+      }
+    }
+    csv_file_ << "]\"";
+
+    // Detailed detection information (JSON-like format)
+    csv_file_ << ",\"[";
+    bool first_det = true;
+    for (const auto& detection : ml_result.detections) {
+      if (!first_det) csv_file_ << ",";
+      csv_file_ << "{cls:" << detection.class_id
+                << ",conf:" << std::fixed << std::setprecision(2) << detection.confidence
+                << ",x:" << detection.bbox.x
+                << ",y:" << detection.bbox.y
+                << ",w:" << detection.bbox.width
+                << ",h:" << detection.bbox.height << "}";
+      first_det = false;
+    }
+    csv_file_ << "]\"";
+  }
+
+  csv_file_ << "\n";
+  csv_file_.flush();  // Ensure data is written immediately
+}
+
+void OutputManager::closeCSV() {
+  if (csv_file_.is_open()) {
+    csv_file_.close();
+    if (config_.enable_csv_logging) {
+      spdlog::info("CSV logging completed: {}", config_.csv_output_path);
+    }
   }
 }

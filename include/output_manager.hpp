@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 
 #include <chrono>
+#include <fstream>
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <string>
@@ -17,6 +18,11 @@ struct OutputConfig {
   bool verbose_logging = false;
   std::string log_level = "info";
   int performance_summary_interval = 30;  // seconds
+
+  // CSV logging settings
+  bool enable_csv_logging = true;
+  std::string csv_output_path = "output/frame_log.csv";
+  bool csv_comprehensive_mode = true;  // Log everything vs. compact mode
 
   // Video output settings
   bool enable_video_output = false;
@@ -107,6 +113,14 @@ public:
 
   void logPerformanceSummary(bool force = false);
 
+  // CSV logging methods
+  void initializeCSV();
+  void writeCSVHeader();
+  void writeCSVRow(uint64_t frame_id, float video_timestamp_sec, float pre_ms, float inf_ms, 
+                   float post_ms, float e2e_ms, bool missed, const GpuMotionResult& motion_result,
+                   const MLResult& ml_result);
+  void closeCSV();
+
   // Video output
   bool isVideoOutputEnabled() const { return config_.enable_video_output; }
   size_t getBufferedFrameCount() const { return buffered_frames_.size(); }
@@ -115,6 +129,10 @@ private:
   OutputConfig config_;
   cv::VideoWriter video_writer_;
   PerformanceStats stats_;
+
+  // CSV logging
+  std::ofstream csv_file_;
+  bool csv_header_written_;
 
   // Frame buffering for video output
   std::vector<cv::Mat> buffered_frames_;
