@@ -10,7 +10,10 @@
 #include "vehicle_analytics.hpp"
 
 OutputManager::OutputManager(const OutputConfig& config)
-    : config_(config), frame_width_(0), frame_height_(0), csv_header_written_(false),
+    : config_(config),
+      frame_width_(0),
+      frame_height_(0),
+      csv_header_written_(false),
       video_writer_initialized_(false) {
   // Set logging level
   if (config_.log_level == "debug") {
@@ -38,9 +41,7 @@ OutputManager::OutputManager(const OutputConfig& config)
   }
 }
 
-OutputManager::~OutputManager() { 
-  cleanup(); 
-}
+OutputManager::~OutputManager() { cleanup(); }
 
 bool OutputManager::initialize(int frame_width, int frame_height) {
   frame_width_ = frame_width;
@@ -100,7 +101,7 @@ void OutputManager::processFrame(const cv::Mat& frame, const MLResult& ml_result
 
   // Write comprehensive CSV log entry
   if (config_.enable_csv_logging) {
-    writeCSVRow(frame_id, video_timestamp_sec, pre_ms, inf_ms, post_ms, e2e_ms, missed, 
+    writeCSVRow(frame_id, video_timestamp_sec, pre_ms, inf_ms, post_ms, e2e_ms, missed,
                 motion_result, ml_result);
   }
 
@@ -473,7 +474,7 @@ void OutputManager::initializeCSV() {
   // Ensure output directory exists
   std::filesystem::path csv_path(config_.csv_output_path);
   std::filesystem::path directory = csv_path.parent_path();
-  
+
   if (!directory.empty() && !std::filesystem::exists(directory)) {
     std::filesystem::create_directories(directory);
     spdlog::info("Created CSV output directory: {}", directory.string());
@@ -489,7 +490,7 @@ void OutputManager::initializeCSV() {
   // Write CSV header
   writeCSVHeader();
   csv_header_written_ = true;
-  
+
   spdlog::info("CSV logging initialized: {}", config_.csv_output_path);
 }
 
@@ -517,38 +518,33 @@ void OutputManager::writeCSVHeader() {
               << "danger_zone_vehicles,traffic_density,collision_warning,"
               << "current_fps,avg_inference_time,total_frames_processed\n";
   }
-  
+
   csv_file_.flush();
 }
 
-void OutputManager::writeCSVRow(uint64_t frame_id, float video_timestamp_sec, float pre_ms, 
+void OutputManager::writeCSVRow(uint64_t frame_id, float video_timestamp_sec, float pre_ms,
                                 float inf_ms, float post_ms, float e2e_ms, bool missed,
                                 const GpuMotionResult& motion_result, const MLResult& ml_result) {
   if (!csv_file_.is_open()) return;
 
   // Basic timing and frame info
-  csv_file_ << frame_id << ","
-            << std::fixed << std::setprecision(3) << video_timestamp_sec << ","
-            << std::fixed << std::setprecision(3) << pre_ms << ","
-            << std::fixed << std::setprecision(3) << inf_ms << ","
-            << std::fixed << std::setprecision(3) << post_ms << ","
-            << std::fixed << std::setprecision(3) << e2e_ms << ","
-            << (missed ? 1 : 0) << ","
-            << (motion_result.motion_detected ? 1 : 0) << ","
+  csv_file_ << frame_id << "," << std::fixed << std::setprecision(3) << video_timestamp_sec << ","
+            << std::fixed << std::setprecision(3) << pre_ms << "," << std::fixed
+            << std::setprecision(3) << inf_ms << "," << std::fixed << std::setprecision(3)
+            << post_ms << "," << std::fixed << std::setprecision(3) << e2e_ms << ","
+            << (missed ? 1 : 0) << "," << (motion_result.motion_detected ? 1 : 0) << ","
             << std::fixed << std::setprecision(3) << motion_result.motion_intensity;
 
   if (config_.csv_comprehensive_mode) {
     // Extended motion information
-    csv_file_ << "," << motion_result.motion_pixels
-              << "," << ml_result.motion_bbox.x
-              << "," << ml_result.motion_bbox.y  
-              << "," << ml_result.motion_bbox.width
-              << "," << ml_result.motion_bbox.height;
+    csv_file_ << "," << motion_result.motion_pixels << "," << ml_result.motion_bbox.x << ","
+              << ml_result.motion_bbox.y << "," << ml_result.motion_bbox.width << ","
+              << ml_result.motion_bbox.height;
   }
 
   // Object detection info
-  csv_file_ << "," << ml_result.total_objects
-            << "," << std::fixed << std::setprecision(3) << ml_result.max_confidence;
+  csv_file_ << "," << ml_result.total_objects << "," << std::fixed << std::setprecision(3)
+            << ml_result.max_confidence;
 
   if (config_.csv_comprehensive_mode) {
     csv_file_ << "," << (ml_result.significant_motion ? 1 : 0);
@@ -589,36 +585,29 @@ void OutputManager::writeCSVRow(uint64_t frame_id, float video_timestamp_sec, fl
     lost_tracks = analytics.lost_tracks;
   }
 
-  csv_file_ << "," << vehicles_detected
-            << "," << active_tracks
-            << "," << approaching_vehicles
+  csv_file_ << "," << vehicles_detected << "," << active_tracks << "," << approaching_vehicles
             << "," << danger_zone_vehicles;
 
   if (config_.csv_comprehensive_mode) {
-    csv_file_ << "," << overtaking_vehicles
-              << "," << vehicles_in_ego_lane;
+    csv_file_ << "," << overtaking_vehicles << "," << vehicles_in_ego_lane;
   }
 
-  csv_file_ << "," << std::fixed << std::setprecision(3) << traffic_density
-            << "," << (collision_warning ? 1 : 0);
+  csv_file_ << "," << std::fixed << std::setprecision(3) << traffic_density << ","
+            << (collision_warning ? 1 : 0);
 
   if (config_.csv_comprehensive_mode) {
-    csv_file_ << "," << (lane_change_safe ? 1 : 0)
-              << "," << std::fixed << std::setprecision(3) << closest_vehicle_distance
-              << "," << std::fixed << std::setprecision(3) << analytics_time_ms
-              << "," << tracks_updated
-              << "," << new_tracks
-              << "," << lost_tracks;
+    csv_file_ << "," << (lane_change_safe ? 1 : 0) << "," << std::fixed << std::setprecision(3)
+              << closest_vehicle_distance << "," << std::fixed << std::setprecision(3)
+              << analytics_time_ms << "," << tracks_updated << "," << new_tracks << ","
+              << lost_tracks;
   }
 
   // Performance metrics
-  csv_file_ << "," << std::fixed << std::setprecision(3) << stats_.getFPS()
-            << "," << std::fixed << std::setprecision(3) << stats_.getAvgInferenceTime()
-            << "," << stats_.total_frames;
+  csv_file_ << "," << std::fixed << std::setprecision(3) << stats_.getFPS() << "," << std::fixed
+            << std::setprecision(3) << stats_.getAvgInferenceTime() << "," << stats_.total_frames;
 
   if (config_.csv_comprehensive_mode) {
-    csv_file_ << "," << stats_.vehicles_detected
-              << "," << stats_.collision_warnings;
+    csv_file_ << "," << stats_.vehicles_detected << "," << stats_.collision_warnings;
 
     // Detailed track information (JSON-like format)
     csv_file_ << ",\"[";
@@ -626,14 +615,11 @@ void OutputManager::writeCSVRow(uint64_t frame_id, float video_timestamp_sec, fl
       bool first_track = true;
       for (const auto& track : ml_result.vehicle_analytics->active_tracks) {
         if (!first_track) csv_file_ << ",";
-        csv_file_ << "{id:" << track.track_id
-                  << ",type:" << static_cast<int>(track.type)
+        csv_file_ << "{id:" << track.track_id << ",type:" << static_cast<int>(track.type)
                   << ",conf:" << std::fixed << std::setprecision(2) << track.confidence
                   << ",speed:" << std::fixed << std::setprecision(1) << track.speed_estimate
-                  << ",x:" << track.current_bbox.x
-                  << ",y:" << track.current_bbox.y
-                  << ",w:" << track.current_bbox.width
-                  << ",h:" << track.current_bbox.height << "}";
+                  << ",x:" << track.current_bbox.x << ",y:" << track.current_bbox.y
+                  << ",w:" << track.current_bbox.width << ",h:" << track.current_bbox.height << "}";
         first_track = false;
       }
     }
@@ -644,12 +630,9 @@ void OutputManager::writeCSVRow(uint64_t frame_id, float video_timestamp_sec, fl
     bool first_det = true;
     for (const auto& detection : ml_result.detections) {
       if (!first_det) csv_file_ << ",";
-      csv_file_ << "{cls:" << detection.class_id
-                << ",conf:" << std::fixed << std::setprecision(2) << detection.confidence
-                << ",x:" << detection.bbox.x
-                << ",y:" << detection.bbox.y
-                << ",w:" << detection.bbox.width
-                << ",h:" << detection.bbox.height << "}";
+      csv_file_ << "{cls:" << detection.class_id << ",conf:" << std::fixed << std::setprecision(2)
+                << detection.confidence << ",x:" << detection.bbox.x << ",y:" << detection.bbox.y
+                << ",w:" << detection.bbox.width << ",h:" << detection.bbox.height << "}";
       first_det = false;
     }
     csv_file_ << "]\"";

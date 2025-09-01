@@ -30,7 +30,6 @@ public:
   StatSnapshot stats() const;
 
 private:
-
   PipelineConfig cfg_;
   DeadlineProfile dl_;
   MetricsRegistry& metrics_;

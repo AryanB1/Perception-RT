@@ -115,7 +115,7 @@ public:
   // CSV logging methods
   void initializeCSV();
   void writeCSVHeader();
-  void writeCSVRow(uint64_t frame_id, float video_timestamp_sec, float pre_ms, float inf_ms, 
+  void writeCSVRow(uint64_t frame_id, float video_timestamp_sec, float pre_ms, float inf_ms,
                    float post_ms, float e2e_ms, bool missed, const GpuMotionResult& motion_result,
                    const MLResult& ml_result);
   void closeCSV();
