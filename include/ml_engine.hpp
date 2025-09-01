@@ -85,7 +85,6 @@ struct MLConfig {
   // Model paths
   std::string yolo_model_path = "model/yolo/yolo11s.onnx";
   std::string yolo_engine_path = "model/yolo/yolo11s.engine";
-  std::string segmentation_model_path = "models/deeplabv3.onnx";
 
   // TensorRT settings
   bool use_tensorrt = true;
@@ -102,14 +101,10 @@ struct MLConfig {
   int max_corners = 100;
   float optical_flow_threshold = 1.0f;
 
-  // Segmentation settings
-  float segmentation_threshold = 0.5f;
-
   // Processing settings
   cv::Size input_size{640, 640};
   bool enable_detection = true;
   bool enable_optical_flow = true;
-  bool enable_segmentation = false;  // Disabled by default due to computational cost
 
   // Vehicle analytics settings
   bool enable_vehicle_analytics = false;
@@ -179,10 +174,8 @@ public:
   // Individual processing methods
   std::vector<Detection> detectObjects(const cv::Mat& frame);
   OpticalFlowResult computeOpticalFlow(const cv::Mat& frame);
-  SegmentationResult segmentFrame(const cv::Mat& frame);
 
   // Model management
-  bool loadModel(const std::string& model_path, const std::string& model_type);
   void setConfig(const MLConfig& config) { config_ = config; }
   const MLConfig& getConfig() const { return config_; }
 
@@ -204,11 +197,9 @@ private:
   PerformanceStats stats_;
 
   std::unique_ptr<TensorRTEngine> yolo_engine_;
-  std::unique_ptr<TensorRTEngine> segmentation_engine_;
 
   // OpenCV DNN fallback
   cv::dnn::Net yolo_net_;
-  cv::dnn::Net segmentation_net_;
 
   // Optical flow tracker
   cv::Ptr<cv::SparsePyrLKOpticalFlow> optical_flow_tracker_;
@@ -223,13 +214,10 @@ private:
 
   // Preprocessing
   cv::Mat preprocessForYOLO(const cv::Mat& frame);
-  cv::Mat preprocessForSegmentation(const cv::Mat& frame);
 
   // Postprocessing
   std::vector<Detection> postprocessYOLO(const std::vector<float>& output,
                                          const cv::Size& original_size);
-  SegmentationResult postprocessSegmentation(const std::vector<float>& output,
-                                             const cv::Size& original_size);
 
   // Utility methods
   void loadClassNames();
@@ -248,6 +236,5 @@ std::unique_ptr<MLEngine> createMLEngine(const MLConfig& config = MLConfig{});
 namespace MLViz {
 cv::Mat drawDetections(const cv::Mat& frame, const std::vector<Detection>& detections);
 cv::Mat drawOpticalFlow(const cv::Mat& frame, const OpticalFlowResult& flow);
-cv::Mat drawSegmentation(const cv::Mat& frame, const SegmentationResult& segmentation);
 cv::Mat drawComprehensiveResults(const cv::Mat& frame, const MLResult& result);
 }  // namespace MLViz

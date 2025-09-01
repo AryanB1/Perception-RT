@@ -245,7 +245,7 @@ LaneInfo VehicleAnalytics::detectLanes(const cv::Mat& frame) {
   cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
   // Focus on lower part of the image where lanes are typically visible
-  int roi_top = static_cast<int>(static_cast<float>(frame.rows) * config_.lane_detection_roi_top);
+  int roi_top = static_cast<int>(static_cast<float>(frame.rows) * 0.4f);  // Fixed to 40% of frame height
   cv::Rect roi(0, roi_top, frame.cols, frame.rows - roi_top);
   cv::Mat roi_gray = gray(roi);
 

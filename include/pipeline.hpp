@@ -30,11 +30,6 @@ public:
   StatSnapshot stats() const;
 
 private:
-  bool next_frame_step();
-
-  bool preprocess_any(/*in*/ void* in, /*out*/ void* out);
-  bool inference_any(/*in*/ void* in, /*out*/ void* out);
-  bool postprocess_any(/*in*/ void* in, /*out*/ void* out);
 
   PipelineConfig cfg_;
   DeadlineProfile dl_;

@@ -124,8 +124,7 @@ struct VehicleAnalyticsConfig {
   float fps{30.0f};               // frames per second for speed calculation
 
   // Lane detection parameters
-  bool enable_lane_detection{true};
-  float lane_detection_roi_top{0.4f};  // start ROI at 40% of frame height
+  bool enable_lane_detection{false};  // Disabled - incomplete implementation
 
   // Analytics features
   bool enable_tracking{true};

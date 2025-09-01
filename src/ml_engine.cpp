@@ -43,23 +43,18 @@ TensorRTEngine::TensorRTEngine(const std::string& onnx_path, const MLConfig& con
     throw std::runtime_error("Failed to create TensorRT builder");
   }
 
-  // Create network with modern API (no explicit batch flag needed)
   network_.reset(builder_->createNetworkV2(0U));
   if (!network_) {
     throw std::runtime_error("Failed to create TensorRT network");
   }
 
-  // Create builder config
   config_.reset(builder_->createBuilderConfig());
   if (!config_) {
     throw std::runtime_error("Failed to create TensorRT builder config");
   }
 
-  // Set config parameters
   config_->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, config.max_workspace_size);
   if (config.use_fp16) {
-    // Note: FP16 optimization will be set during network optimization phase
-    // The deprecated flags are no longer needed in modern TensorRT
     spdlog::info("TensorRT: FP16 optimization will be enabled during build");
   }
 
@@ -365,24 +360,6 @@ bool MLEngine::initialize() {
           spdlog::info("Loaded pre-built TensorRT engine from {}", config_.yolo_engine_path);
         }
       }
-
-      // Initialize segmentation engine if enabled
-      if (config_.enable_segmentation) {
-        segmentation_engine_ =
-            std::make_unique<TensorRTEngine>(config_.segmentation_model_path, config_);
-
-        std::string seg_engine_path = config_.segmentation_model_path + ".trt";
-        if (!segmentation_engine_->loadEngine(seg_engine_path)) {
-          spdlog::info("Building new TensorRT engine for segmentation...");
-          if (!segmentation_engine_->build()) {
-            spdlog::warn(
-                "Failed to build segmentation TensorRT engine, falling back to OpenCV DNN");
-            config_.use_tensorrt = false;
-          } else {
-            segmentation_engine_->saveEngine(seg_engine_path);
-          }
-        }
-      }
     } catch (const std::exception& e) {
       spdlog::error("TensorRT initialization failed: {}", e.what());
       config_.use_tensorrt = false;
@@ -392,7 +369,6 @@ bool MLEngine::initialize() {
   spdlog::info("ML Engine initialized successfully");
   spdlog::info("  - Object Detection: {}", config_.enable_detection ? "Enabled" : "Disabled");
   spdlog::info("  - Optical Flow: {}", config_.enable_optical_flow ? "Enabled" : "Disabled");
-  spdlog::info("  - Segmentation: {}", config_.enable_segmentation ? "Enabled" : "Disabled");
   spdlog::info("  - Vehicle Analytics: {}",
                config_.enable_vehicle_analytics ? "Enabled" : "Disabled");
   spdlog::info("  - TensorRT: {}", config_.use_tensorrt ? "Enabled" : "Disabled");
@@ -430,13 +406,7 @@ MLResult MLEngine::process(const cv::Mat& frame) {
     result.inference_time_ms += flow_time;
   }
 
-  // Semantic Segmentation
-  if (config_.enable_segmentation) {
-    startTimer();
-    result.segmentation = segmentFrame(frame);
-    float seg_time = getElapsedMs();
-    result.inference_time_ms += seg_time;
-  }
+  // Semantic Segmentation - Removed (incomplete implementation)
 
   // Vehicle Analytics
   if (config_.enable_vehicle_analytics && vehicle_analytics_) {
@@ -582,29 +552,7 @@ OpticalFlowResult MLEngine::computeOpticalFlow(const cv::Mat& frame) {
   return result;
 }
 
-SegmentationResult MLEngine::segmentFrame(const cv::Mat& /*frame*/) {
-  SegmentationResult result;
-
-  if (!config_.enable_segmentation) return result;
-
-  // Implementation would go here - this is a placeholder
-  // In a real implementation, you would:
-  // 1. Preprocess frame for segmentation model
-  // 2. Run inference (TensorRT or OpenCV DNN)
-  // 3. Postprocess to create segmentation masks
-
-  spdlog::debug("Segmentation inference not fully implemented yet");
-  return result;
-}
-
 cv::Mat MLEngine::preprocessForYOLO(const cv::Mat& frame) {
-  cv::Mat resized = resizeKeepAspectRatio(frame, config_.input_size);
-  cv::Mat blob;
-  cv::dnn::blobFromImage(resized, blob, 1.0 / 255.0, config_.input_size, cv::Scalar(), true, false);
-  return blob;
-}
-
-cv::Mat MLEngine::preprocessForSegmentation(const cv::Mat& frame) {
   cv::Mat resized = resizeKeepAspectRatio(frame, config_.input_size);
   cv::Mat blob;
   cv::dnn::blobFromImage(resized, blob, 1.0 / 255.0, config_.input_size, cv::Scalar(), true, false);
@@ -714,15 +662,6 @@ std::vector<Detection> MLEngine::postprocessYOLO(const std::vector<float>& outpu
   return detections;
 }
 
-SegmentationResult MLEngine::postprocessSegmentation(const std::vector<float>& /*output*/,
-                                                     const cv::Size& /*original_size*/) {
-  SegmentationResult result;
-
-  // Implementation would go here
-
-  return result;
-}
-
 void MLEngine::loadClassNames() {
   // COCO class names for YOLO
   class_names_ = {"person",        "bicycle",      "car",
@@ -823,19 +762,6 @@ cv::Mat drawOpticalFlow(const cv::Mat& frame, const OpticalFlowResult& flow) {
   return result;
 }
 
-cv::Mat drawSegmentation(const cv::Mat& frame, const SegmentationResult& segmentation) {
-  cv::Mat result = frame.clone();
-
-  if (!segmentation.class_mask.empty()) {
-    cv::Mat colored_mask;
-    segmentation.class_mask.convertTo(colored_mask, CV_8UC3);
-    cv::applyColorMap(colored_mask, colored_mask, cv::COLORMAP_JET);
-    cv::addWeighted(result, 0.7, colored_mask, 0.3, 0, result);
-  }
-
-  return result;
-}
-
 cv::Mat drawComprehensiveResults(const cv::Mat& frame, const MLResult& result) {
   cv::Mat output = frame.clone();
 
@@ -844,9 +770,6 @@ cv::Mat drawComprehensiveResults(const cv::Mat& frame, const MLResult& result) {
 
   // Draw optical flow
   output = drawOpticalFlow(output, result.optical_flow);
-
-  // Draw segmentation
-  output = drawSegmentation(output, result.segmentation);
 
   // Draw vehicle analytics if enabled
   if (result.vehicle_analytics_enabled && result.vehicle_analytics) {

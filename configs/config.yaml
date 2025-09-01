@@ -18,7 +18,6 @@ ml_engine:
   # Model paths (relative to project root)
   yolo_model_path: "model/yolo/yolo11s.onnx"
   yolo_engine_path: "model/yolo/yolo11s.engine"
-  segmentation_model_path: "models/deeplabv3.onnx"
   
   # TensorRT settings
   use_tensorrt: true
@@ -40,9 +39,6 @@ ml_engine:
   max_corners: 100
   optical_flow_threshold: 1.0
   
-  # Segmentation settings
-  segmentation_threshold: 0.5
-  
   # Processing settings
   input_width: 640
   input_height: 640
@@ -50,10 +46,9 @@ ml_engine:
   # Feature toggles - optimized for vehicle analytics
   enable_detection: true
   enable_optical_flow: true
-  enable_segmentation: false  # Disabled for performance
-  enable_vehicle_analytics: true  # New: vehicle-specific analytics
-  enable_tracking: true  # New: object tracking for vehicles
-  enable_proximity_detection: true  # New: detect vehicles getting close
+  enable_vehicle_analytics: true  # Vehicle-specific analytics
+  enable_tracking: true  # Object tracking for vehicles
+  enable_proximity_detection: true  # Detect vehicles getting close
 
 # Logging and Output Configuration
 output:

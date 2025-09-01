@@ -204,8 +204,3 @@ StatSnapshot Pipeline::stats() const {
   std::lock_guard<std::mutex> g(stat_mu_);
   return last_stats_;
 }
-
-bool Pipeline::next_frame_step() { return true; }
-bool Pipeline::preprocess_any(void*, void*) { return true; }
-bool Pipeline::inference_any(void*, void*) { return true; }
-bool Pipeline::postprocess_any(void*, void*) { return true; }

@@ -37,8 +37,6 @@ AppConfig load_config(const std::string& path) {
       c.ml_config.yolo_model_path = ml["yolo_model_path"].as<std::string>();
     if (ml["yolo_engine_path"])
       c.ml_config.yolo_engine_path = ml["yolo_engine_path"].as<std::string>();
-    if (ml["segmentation_model_path"])
-      c.ml_config.segmentation_model_path = ml["segmentation_model_path"].as<std::string>();
 
     if (ml["use_tensorrt"]) c.ml_config.use_tensorrt = ml["use_tensorrt"].as<bool>();
     if (ml["use_fp16"]) c.ml_config.use_fp16 = ml["use_fp16"].as<bool>();
@@ -55,9 +53,6 @@ AppConfig load_config(const std::string& path) {
     if (ml["optical_flow_threshold"])
       c.ml_config.optical_flow_threshold = ml["optical_flow_threshold"].as<float>();
 
-    if (ml["segmentation_threshold"])
-      c.ml_config.segmentation_threshold = ml["segmentation_threshold"].as<float>();
-
     if (ml["input_width"] && ml["input_height"]) {
       c.ml_config.input_size = cv::Size(ml["input_width"].as<int>(), ml["input_height"].as<int>());
     }
@@ -65,8 +60,6 @@ AppConfig load_config(const std::string& path) {
     if (ml["enable_detection"]) c.ml_config.enable_detection = ml["enable_detection"].as<bool>();
     if (ml["enable_optical_flow"])
       c.ml_config.enable_optical_flow = ml["enable_optical_flow"].as<bool>();
-    if (ml["enable_segmentation"])
-      c.ml_config.enable_segmentation = ml["enable_segmentation"].as<bool>();
 
     // Vehicle analytics configuration
     if (ml["enable_vehicle_analytics"])
