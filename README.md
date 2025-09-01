@@ -2,20 +2,16 @@
 
 A high-performance real-time video processing system designed for intelligent vehicle analytics and computer vision applications. Built with CUDA acceleration, TensorRT optimization, and comprehensive performance monitoring.
 
-## Overview
-
-FrameKeeper-RT delivers enterprise-grade real-time video processing capabilities for automotive safety applications, featuring sub-3ms latency, 100% deadline compliance, and intelligent vehicle detection and tracking. The system integrates YOLOv11 object detection, optical flow analysis, and advanced collision warning algorithms in a unified pipeline.
-
 ## Key Features
 
 ### Real-Time Performance
 - **Sub-3ms Latency**: Average end-to-end processing latency of 2.07ms with 95th percentile at 3.11ms
-- **100% Deadline Compliance**: Maintains 30 FPS target with zero missed deadlines
+- **100% Deadline Compliance**: Maintains 24 FPS 4K target with zero missed deadlines
 - **CUDA Acceleration**: GPU-optimized motion detection and preprocessing pipelines
 - **TensorRT Integration**: Optimized FP16 inference with dynamic batching support
 
 ### Computer Vision Capabilities
-- **YOLOv11 Object Detection**: Real-time vehicle detection with 30+ objects per frame
+- **YOLOv11 Object Detection**: Real-time vehicle detection with 10+ objects per frame
 - **Multi-Object Tracking**: Persistent vehicle tracking with trajectory analysis
 - **Optical Flow Analysis**: Lucas-Kanade sparse optical flow for motion estimation
 
@@ -54,8 +50,8 @@ Advanced vehicle analytics with multi-object tracking, detecting an average of 1
 - **Output Manager**: Comprehensive logging, video output, and performance monitoring
 
 ### Dependencies
-- **CUDA Toolkit**: GPU acceleration and memory management
-- **TensorRT**: Optimized neural network inference
-- **OpenCV 4.5+**: Computer vision operations and DNN module
-- **YOLOv11**: State-of-the-art object detection
-- **Modern C++20**: High-performance system programming
+- **CUDA Toolkit**
+- **TensorRT**
+- **OpenCV 4.5+**
+- **YOLOv11**
+- **C++20**
