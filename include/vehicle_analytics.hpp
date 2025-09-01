@@ -55,21 +55,6 @@ struct VehicleTrack {
   bool isLost(int max_frames_lost = 10) const { return frames_lost > max_frames_lost; }
 };
 
-// Lane detection and analysis
-struct LaneInfo {
-  std::vector<cv::Point> left_lane;
-  std::vector<cv::Point> right_lane;
-  cv::Point vanishing_point;
-  bool lanes_detected{false};
-  float lane_width_pixels{0.0f};
-
-  // Check if a point is in the ego lane
-  bool isInEgoLane(const cv::Point2f& point) const;
-
-  // Get relative position in lane (-1 = left, 0 = center, 1 = right)
-  float getLanePosition(const cv::Point2f& point) const;
-};
-
 // Comprehensive vehicle analytics result
 struct VehicleAnalyticsResult {
   // Vehicle detections and tracking
@@ -82,14 +67,10 @@ struct VehicleAnalyticsResult {
   std::vector<int> danger_zone_vehicles;  // track IDs of vehicles too close
   std::vector<int> overtaking_vehicles;   // track IDs of vehicles overtaking
 
-  // Lane analysis
-  LaneInfo lane_info;
-  bool ego_lane_clear{true};
-  int vehicles_in_ego_lane{0};
-
   // Traffic flow analysis
   float traffic_density{0.0f};                     // vehicles per unit area
   cv::Point2f traffic_flow_direction{0.0f, 0.0f};  // average motion vector
+  int vehicles_in_ego_lane{0};
 
   // Proximity warnings
   bool collision_warning{false};
@@ -123,9 +104,6 @@ struct VehicleAnalyticsConfig {
   float pixels_per_meter{20.0f};  // calibration for speed estimation
   float fps{30.0f};               // frames per second for speed calculation
 
-  // Lane detection parameters
-  bool enable_lane_detection{false};  // Disabled - incomplete implementation
-
   // Analytics features
   bool enable_tracking{true};
   bool enable_proximity_detection{true};
@@ -147,7 +125,6 @@ public:
   std::vector<Detection> filterVehicleDetections(const std::vector<Detection>& detections);
   void updateTracks(const std::vector<Detection>& vehicle_detections,
                     std::chrono::steady_clock::time_point timestamp);
-  LaneInfo detectLanes(const cv::Mat& frame);
   void analyzeSafety(VehicleAnalyticsResult& result, const cv::Size& frame_size);
   void analyzeTrafficFlow(VehicleAnalyticsResult& result);
 
@@ -180,9 +157,6 @@ private:
   std::unordered_map<int, VehicleTrack> active_tracks_;
   int next_track_id_{1};
 
-  // Lane detection state
-  cv::Ptr<cv::LineSegmentDetector> line_detector_;
-
   // Timing
   std::chrono::steady_clock::time_point timer_start_;
 
@@ -201,10 +175,6 @@ private:
   bool isInWarningZone(const cv::Rect& bbox, const cv::Size& frame_size);
   float estimateDistance(const cv::Rect& bbox, const cv::Size& frame_size);
 
-  // Lane detection helpers
-  std::vector<cv::Vec4f> detectLaneLines(const cv::Mat& frame);
-  cv::Point findVanishingPoint(const std::vector<cv::Vec4f>& lines);
-
   // Utility
   void startTimer();
   float getElapsedMs();
@@ -218,7 +188,6 @@ std::unique_ptr<VehicleAnalytics> createVehicleAnalytics(
 namespace VehicleViz {
 cv::Mat drawVehicleTracks(const cv::Mat& frame, const std::vector<VehicleTrack>& tracks);
 cv::Mat drawSafetyZones(const cv::Mat& frame, const VehicleAnalyticsConfig& config);
-cv::Mat drawLaneDetection(const cv::Mat& frame, const LaneInfo& lane_info);
 cv::Mat drawProximityWarnings(const cv::Mat& frame, const VehicleAnalyticsResult& result);
 cv::Mat drawAnalyticsOverlay(const cv::Mat& frame, const VehicleAnalyticsResult& result);
 }  // namespace VehicleViz

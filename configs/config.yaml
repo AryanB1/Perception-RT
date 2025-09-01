@@ -87,5 +87,4 @@ output:
   show_tracking_ids: true
   show_analytics_panel: true
   show_collision_warnings: true
-  show_lane_detection: false  # Placeholder implementation
   overlay_opacity: 0.8

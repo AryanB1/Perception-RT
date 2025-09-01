@@ -503,7 +503,7 @@ void OutputManager::writeCSVHeader() {
               << "motion_bbox_x,motion_bbox_y,motion_bbox_w,motion_bbox_h,"
               << "total_objects,max_confidence,significant_motion,"
               << "vehicles_detected,active_tracks,approaching_vehicles,danger_zone_vehicles,"
-              << "overtaking_vehicles,vehicles_in_ego_lane,ego_lane_clear,"
+              << "overtaking_vehicles,vehicles_in_ego_lane,"
               << "traffic_density,collision_warning,lane_change_safe,closest_vehicle_distance,"
               << "analytics_time_ms,tracks_updated,new_tracks,lost_tracks,"
               << "current_fps,avg_inference_time,total_frames_processed,"
@@ -561,7 +561,6 @@ void OutputManager::writeCSVRow(uint64_t frame_id, float video_timestamp_sec, fl
   int danger_zone_vehicles = 0;
   int overtaking_vehicles = 0;
   int vehicles_in_ego_lane = 0;
-  bool ego_lane_clear = true;
   float traffic_density = 0.0f;
   bool collision_warning = false;
   bool lane_change_safe = true;
@@ -579,7 +578,7 @@ void OutputManager::writeCSVRow(uint64_t frame_id, float video_timestamp_sec, fl
     danger_zone_vehicles = static_cast<int>(analytics.danger_zone_vehicles.size());
     overtaking_vehicles = static_cast<int>(analytics.overtaking_vehicles.size());
     vehicles_in_ego_lane = analytics.vehicles_in_ego_lane;
-    ego_lane_clear = analytics.ego_lane_clear;
+    // ego_lane_clear removed - was part of lane detection feature
     traffic_density = analytics.traffic_density;
     collision_warning = analytics.collision_warning;
     lane_change_safe = analytics.lane_change_safe;
@@ -597,8 +596,7 @@ void OutputManager::writeCSVRow(uint64_t frame_id, float video_timestamp_sec, fl
 
   if (config_.csv_comprehensive_mode) {
     csv_file_ << "," << overtaking_vehicles
-              << "," << vehicles_in_ego_lane
-              << "," << (ego_lane_clear ? 1 : 0);
+              << "," << vehicles_in_ego_lane;
   }
 
   csv_file_ << "," << std::fixed << std::setprecision(3) << traffic_density

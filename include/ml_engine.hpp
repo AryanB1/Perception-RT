@@ -16,7 +16,6 @@
 struct MLResult;
 struct Detection;
 struct OpticalFlowResult;
-struct SegmentationResult;
 struct VehicleAnalyticsResult;
 class VehicleAnalytics;
 struct VehicleAnalyticsConfig;
@@ -42,14 +41,6 @@ struct OpticalFlowResult {
   int moving_points{0};
 };
 
-// Semantic segmentation result
-struct SegmentationResult {
-  cv::Mat class_mask;       // HxW mask with class IDs
-  cv::Mat confidence_mask;  // HxW confidence scores
-  std::vector<int> detected_classes;
-  std::unordered_map<int, float> class_areas;  // class_id -> normalized area
-};
-
 // Comprehensive ML result combining all inference types
 struct MLResult {
   // Object Detection (YOLOv11)
@@ -60,9 +51,6 @@ struct MLResult {
   // Optical Flow
   OpticalFlowResult optical_flow;
   bool significant_motion{false};
-
-  // Semantic Segmentation
-  SegmentationResult segmentation;
 
   // Vehicle Analytics (new)
   std::unique_ptr<VehicleAnalyticsResult> vehicle_analytics;

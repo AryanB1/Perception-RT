@@ -36,7 +36,6 @@ struct OutputConfig {
   bool show_tracking_ids = true;
   bool show_analytics_panel = true;
   bool show_collision_warnings = true;
-  bool show_lane_detection = false;
   float overlay_opacity = 0.8f;
 
   // Memory buffering settings

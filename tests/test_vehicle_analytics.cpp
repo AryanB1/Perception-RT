@@ -292,7 +292,7 @@ TEST_F(VehicleAnalyticsMockTest, EmptyFrameAnalysis) {
     EXPECT_EQ(result.total_vehicles, 0);
     EXPECT_TRUE(result.active_tracks.empty());
     EXPECT_TRUE(result.vehicle_detections.empty());
-    EXPECT_TRUE(result.ego_lane_clear);
+    // EXPECT_TRUE(result.ego_lane_clear); // Removed with lane detection feature
     EXPECT_FALSE(result.collision_warning);
     EXPECT_TRUE(result.lane_change_safe);
 }
@@ -352,6 +352,6 @@ TEST(VehicleAnalyticsIntegrationTest, SafetyWarnings) {
     VehicleAnalyticsResult result = analytics->analyze(frame, detections);
     
     // Should trigger safety warnings
-    EXPECT_FALSE(result.ego_lane_clear);
+    // EXPECT_FALSE(result.ego_lane_clear); // Removed with lane detection feature
     // Note: Collision warning depends on implementation details
 }

@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
   if (show_version) {
     std::cout << "FrameKeeper-RT v1.0.0" << std::endl;
     std::cout << "Real-time video processing with CUDA acceleration" << std::endl;
-    std::cout << "Features: YOLOv11, Optical Flow, Semantic Segmentation, TensorRT" << std::endl;
+    std::cout << "Features: YOLOv11, Optical Flow, Vehicle Analytics, TensorRT" << std::endl;
     return 0;
   }
 

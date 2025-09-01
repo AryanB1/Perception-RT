@@ -1,4 +1,4 @@
-# FrameKeeper-RT
+# Perception-RT
 
 A high-performance real-time video processing system designed for intelligent vehicle analytics and computer vision applications. Built with CUDA acceleration, TensorRT optimization, and comprehensive performance monitoring.
 
@@ -18,12 +18,10 @@ FrameKeeper-RT delivers enterprise-grade real-time video processing capabilities
 - **YOLOv11 Object Detection**: Real-time vehicle detection with 30+ objects per frame
 - **Multi-Object Tracking**: Persistent vehicle tracking with trajectory analysis
 - **Optical Flow Analysis**: Lucas-Kanade sparse optical flow for motion estimation
-- **Semantic Segmentation**: Configurable segmentation for advanced scene understanding
 
 ### Vehicle Analytics
 - **Collision Warning System**: Real-time proximity detection and safety zone monitoring
 - **Traffic Density Analysis**: Automated vehicle counting and density metrics
-- **Lane Detection**: Vehicle positioning relative to road infrastructure
 - **Safety Zone Monitoring**: Configurable danger zones with real-time alerts
 
 ### Production-Ready Architecture

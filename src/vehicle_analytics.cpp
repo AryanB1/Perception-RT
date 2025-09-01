@@ -68,26 +68,8 @@ void VehicleTrack::update(const Detection& detection, steady_clock::time_point t
   distance_estimate = 1.0f / (static_cast<float>(current_bbox.area()) / 10000.0f + 0.01f);
 }
 
-// LaneInfo Implementation
-bool LaneInfo::isInEgoLane(const cv::Point2f& /*point*/) const {
-  if (!lanes_detected || left_lane.empty() || right_lane.empty()) return false;
-
-  // Simple check: is point between left and right lane at the point's y-coordinate
-  // This is a simplified implementation
-  return true;  // Placeholder - would need more sophisticated implementation
-}
-
-float LaneInfo::getLanePosition(const cv::Point2f& /*point*/) const {
-  if (!lanes_detected) return 0.0f;
-
-  // Return relative position in lane (-1 = left, 0 = center, 1 = right)
-  // Placeholder implementation
-  return 0.0f;
-}
-
 // VehicleAnalytics Implementation
 VehicleAnalytics::VehicleAnalytics(const VehicleAnalyticsConfig& config) : config_(config) {
-  line_detector_ = cv::createLineSegmentDetector();
   spdlog::info("Vehicle Analytics initialized");
   spdlog::info("  - Vehicle classes: {}", config_.vehicle_classes.size());
   spdlog::info("  - Tracking enabled: {}", config_.enable_tracking);
@@ -118,11 +100,6 @@ VehicleAnalyticsResult VehicleAnalytics::analyze(const cv::Mat& frame,
     }
 
     result.tracks_updated = static_cast<int>(result.active_tracks.size());
-  }
-
-  // Lane detection
-  if (config_.enable_lane_detection) {
-    result.lane_info = detectLanes(frame);
   }
 
   // Safety analysis
@@ -233,61 +210,6 @@ void VehicleAnalytics::pruneExpiredTracks() {
   }
 }
 
-LaneInfo VehicleAnalytics::detectLanes(const cv::Mat& frame) {
-  LaneInfo lane_info;
-
-  if (!config_.enable_lane_detection) {
-    return lane_info;
-  }
-
-  // Simple lane detection using edge detection and line detection
-  cv::Mat gray, edges;
-  cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-
-  // Focus on lower part of the image where lanes are typically visible
-  int roi_top = static_cast<int>(static_cast<float>(frame.rows) * 0.4f);  // Fixed to 40% of frame height
-  cv::Rect roi(0, roi_top, frame.cols, frame.rows - roi_top);
-  cv::Mat roi_gray = gray(roi);
-
-  // Edge detection
-  cv::Canny(roi_gray, edges, 50, 150);
-
-  // Detect lines
-  std::vector<cv::Vec4f> lines = detectLaneLines(edges);
-
-  // Process lines to extract lane boundaries
-  // This is a simplified implementation - real lane detection would be more sophisticated
-  if (lines.size() >= 2) {
-    lane_info.lanes_detected = true;
-    // Placeholder: would implement proper lane line clustering and fitting here
-  }
-
-  return lane_info;
-}
-
-std::vector<cv::Vec4f> VehicleAnalytics::detectLaneLines(const cv::Mat& edges) {
-  std::vector<cv::Vec4f> lines;
-
-  if (line_detector_) {
-    line_detector_->detect(edges, lines);
-  }
-
-  // Filter lines by angle (lane lines should be roughly vertical in image)
-  std::vector<cv::Vec4f> filtered_lines;
-  for (const auto& line : lines) {
-    float dx = line[2] - line[0];
-    float dy = line[3] - line[1];
-    float angle = std::atan2(dy, dx) * 180.0f / static_cast<float>(M_PI);
-
-    // Keep lines that are roughly vertical (lanes) or diagonal
-    if (std::abs(angle) > 30 && std::abs(angle) < 150) {
-      filtered_lines.push_back(line);
-    }
-  }
-
-  return filtered_lines;
-}
-
 void VehicleAnalytics::analyzeSafety(VehicleAnalyticsResult& result, const cv::Size& frame_size) {
   result.closest_vehicle_distance = std::numeric_limits<float>::max();
   result.collision_warning = false;
@@ -320,8 +242,7 @@ void VehicleAnalytics::analyzeSafety(VehicleAnalyticsResult& result, const cv::S
     }
   }
 
-  // Determine if ego lane is clear
-  result.ego_lane_clear = result.danger_zone_vehicles.empty();
+  // Count vehicles in ego lane (simplified to danger zone for now)
   result.vehicles_in_ego_lane = static_cast<int>(result.danger_zone_vehicles.size());
 }
 
@@ -361,9 +282,6 @@ cv::Mat VehicleAnalytics::visualizeAnalytics(const cv::Mat& frame,
 
   // Draw safety zones
   output = VehicleViz::drawSafetyZones(output, config_);
-
-  // Draw lane detection
-  output = VehicleViz::drawLaneDetection(output, result.lane_info);
 
   // Draw proximity warnings
   output = VehicleViz::drawProximityWarnings(output, result);
@@ -552,35 +470,6 @@ cv::Mat drawSafetyZones(const cv::Mat& frame, const VehicleAnalyticsConfig& conf
   if (warning_zone.height > 0) {
     cv::putText(result, "WARNING ZONE", cv::Point(10, warning_zone_top + 30),
                 cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
-  }
-
-  return result;
-}
-
-cv::Mat drawLaneDetection(const cv::Mat& frame, const LaneInfo& lane_info) {
-  cv::Mat result = frame.clone();
-
-  if (!lane_info.lanes_detected) return result;
-
-  // Draw left lane
-  if (!lane_info.left_lane.empty()) {
-    for (size_t i = 1; i < lane_info.left_lane.size(); ++i) {
-      cv::line(result, lane_info.left_lane[i - 1], lane_info.left_lane[i], cv::Scalar(255, 255, 0),
-               3);  // Cyan
-    }
-  }
-
-  // Draw right lane
-  if (!lane_info.right_lane.empty()) {
-    for (size_t i = 1; i < lane_info.right_lane.size(); ++i) {
-      cv::line(result, lane_info.right_lane[i - 1], lane_info.right_lane[i],
-               cv::Scalar(255, 255, 0), 3);  // Cyan
-    }
-  }
-
-  // Draw vanishing point
-  if (lane_info.vanishing_point.x > 0 && lane_info.vanishing_point.y > 0) {
-    cv::circle(result, lane_info.vanishing_point, 5, cv::Scalar(0, 255, 255), -1);
   }
 
   return result;

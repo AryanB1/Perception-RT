@@ -128,8 +128,6 @@ AppConfig load_config(const std::string& path) {
       c.output_config.show_analytics_panel = output["show_analytics_panel"].as<bool>();
     if (output["show_collision_warnings"])
       c.output_config.show_collision_warnings = output["show_collision_warnings"].as<bool>();
-    if (output["show_lane_detection"])
-      c.output_config.show_lane_detection = output["show_lane_detection"].as<bool>();
     if (output["overlay_opacity"])
       c.output_config.overlay_opacity = output["overlay_opacity"].as<float>();
   }
