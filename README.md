@@ -6,7 +6,7 @@ A high-performance real-time video processing system designed for intelligent ve
 
 ### Real-Time Performance
 - **Sub-3ms Latency**: Average end-to-end processing latency of 2.07ms with 95th percentile at 3.11ms
-- **100% Deadline Compliance**: Maintains 24 FPS 4K target with zero missed deadlines
+- **100% Deadline Compliance**: Maintains 30 FPS target with zero missed deadlines
 - **CUDA Acceleration**: GPU-optimized motion detection and preprocessing pipelines
 - **TensorRT Integration**: Optimized FP16 inference with dynamic batching support
 
